@@ -2,8 +2,11 @@ import pandas as pd
 import numpy as np
 import os
 
-INPUT_DIR = "./data_processing"
-OUTPUT_DIR = "./processed_dataset"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+
+INPUT_DIR = os.path.join(PROJECT_ROOT, "data_processing")
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "processed_dataset")
 
 def clean_data(df):
     df = df.copy()

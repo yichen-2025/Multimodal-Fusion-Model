@@ -5,11 +5,14 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+
+sys.path.insert(0, PROJECT_ROOT)
 from utils.log_utils import save_log
 
-INPUT_CSV = "./processed_dataset/processed_dataset.csv"
-OUTPUT_DIR = "./processed_dataset"
+INPUT_CSV = os.path.join(PROJECT_ROOT, "processed_dataset", "processed_dataset.csv")
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "processed_dataset")
 
 SELECTED_FEATURES = [
     "Bwd Packet Length Mean",

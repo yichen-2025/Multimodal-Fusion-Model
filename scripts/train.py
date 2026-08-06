@@ -8,7 +8,10 @@ from transformers import Trainer, TrainingArguments, AutoTokenizer, TrainerCallb
 from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.data.data_loader import generate_mock_data, load_real_data, load_split_data, collate_fn
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+
+sys.path.insert(0, PROJECT_ROOT)
 from utils.log_utils import save_log
 
 
@@ -50,8 +53,10 @@ class LossLoggerCallback(TrainerCallback):
             print(f"Loss日志(JSON格式)已保存到 {json_file}")
 
 
-def get_next_model_id(base_dir="./saved_models"):
+def get_next_model_id(base_dir=None):
     """获取下一个可用的模型ID（自动递增）"""
+    if base_dir is None:
+        base_dir = os.path.join(PROJECT_ROOT, "saved_models")
     os.makedirs(base_dir, exist_ok=True)
     
     max_id = -1
@@ -67,8 +72,8 @@ def get_next_model_id(base_dir="./saved_models"):
     return max_id + 1
 
 
-def train_model(model_path="./models/qwen2.5-1.5b", 
-                output_dir="./models", 
+def train_model(model_path=None, 
+                output_dir=None, 
                 save_path=None,
                 model_id=None,
                 dataset_id=0,
@@ -107,11 +112,17 @@ def train_model(model_path="./models/qwen2.5-1.5b",
     """
     start_time = time.time()
     
+    if model_path is None:
+        model_path = os.path.join(PROJECT_ROOT, "models", "qwen2.5-1.5b")
+    
+    if output_dir is None:
+        output_dir = os.path.join(PROJECT_ROOT, "models")
+    
     if model_id is None:
         model_id = get_next_model_id()
     
     if save_path is None:
-        save_path = os.path.join("./saved_models", f"model_{model_id}")
+        save_path = os.path.join(PROJECT_ROOT, "saved_models", f"model_{model_id}")
     
     print(f"\n训练参数:")
     print(f"  - 模型ID: {model_id}")
@@ -121,11 +132,11 @@ def train_model(model_path="./models/qwen2.5-1.5b",
 
     model = MultiModalFusionModel(llm_model_path=model_path)
     
-    train_dataset = load_split_data(data_dir="split_data", data_type="train", 
+    train_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="train", 
                                     dataset_id=dataset_id, split_id=split_id)
     if train_dataset is None:
         print("Split train data not found, using full processed data...")
-        train_dataset = load_real_data(data_dir="processed_data")
+        train_dataset = load_real_data(data_dir=os.path.join(PROJECT_ROOT, "processed_data"))
         if train_dataset is None:
             print("Real data not found, using mock data for testing...")
             train_dataset = generate_mock_data(200)
@@ -203,7 +214,7 @@ def train_model(model_path="./models/qwen2.5-1.5b",
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="训练多模态融合模型")
-    parser.add_argument("--model_path", type=str, default="./models/qwen2.5-1.5b", help="LLM模型路径")
+    parser.add_argument("--model_path", type=str, default=None, help="LLM模型路径")
     parser.add_argument("--model_id", type=int, default=None, help="模型ID（默认自动递增）")
     parser.add_argument("--dataset_id", type=int, default=0, help="数据集ID")
     parser.add_argument("--split_id", type=int, default=0, help="划分ID")

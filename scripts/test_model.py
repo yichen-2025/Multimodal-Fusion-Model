@@ -12,7 +12,10 @@ from transformers import AutoTokenizer
 from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.data.data_loader import load_real_data, generate_mock_data, load_split_data
 
-REPORTS_DIR = "./test_reports"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+
+REPORTS_DIR = os.path.join(PROJECT_ROOT, "test_reports")
 INDEX_FILE = os.path.join(REPORTS_DIR, "reports_index.csv")
 
 
@@ -103,8 +106,10 @@ def print_evaluation_results(results):
     print("\n" + "=" * 60)
 
 
-def get_model_path(model_id, base_dir="./saved_models"):
+def get_model_path(model_id, base_dir=None):
     """根据模型ID获取模型路径"""
+    if base_dir is None:
+        base_dir = os.path.join(PROJECT_ROOT, "saved_models")
     return os.path.join(base_dir, f"model_{model_id}")
 
 
@@ -226,7 +231,7 @@ def save_test_report(report_data):
 
 
 def test_model(dataset_id=0, split_id=0, model_id=0, 
-               llm_model_path="./models/qwen2.5-1.5b", 
+               llm_model_path=None, 
                verbose=True,
                save_report=True):
     """
@@ -262,6 +267,9 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
         >>> print(results['report_id'])
         3
     """
+    if llm_model_path is None:
+        llm_model_path = os.path.join(PROJECT_ROOT, "models", "qwen2.5-1.5b")
+    
     start_time = time.time()
     timestamp = datetime.now().isoformat()
     
@@ -301,7 +309,7 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
         print("加载测试数据")
         print("=" * 60)
     
-    test_dataset = load_split_data(data_dir="split_data", data_type="test",
+    test_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="test",
                                    dataset_id=dataset_id, split_id=split_id)
     
     if test_dataset is None:
@@ -381,7 +389,7 @@ def main():
     功能：通过命令行参数指定数据集划分和模型，加载测试集进行评估
     """
     parser = argparse.ArgumentParser(description="测试多模态融合模型")
-    parser.add_argument("--model_path", type=str, default="./models/qwen2.5-1.5b", help="LLM模型路径")
+    parser.add_argument("--model_path", type=str, default=None, help="LLM模型路径")
     parser.add_argument("--model_id", type=int, default=None, help="模型ID（用于从saved_models加载）")
     parser.add_argument("--saved_model_path", type=str, default=None, help="训练后模型参数路径（与model_id二选一）")
     parser.add_argument("--dataset_id", type=int, default=0, help="数据集ID")
@@ -389,7 +397,10 @@ def main():
     parser.add_argument("--no_save_report", action="store_true", help="不保存测试报告")
     args = parser.parse_args()
 
-    MODEL_PATH = args.model_path
+    if args.model_path is None:
+        MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "qwen2.5-1.5b")
+    else:
+        MODEL_PATH = args.model_path
     
     if args.saved_model_path is not None:
         SAVED_MODEL_PATH = args.saved_model_path
@@ -398,7 +409,7 @@ def main():
         SAVED_MODEL_PATH = get_model_path(args.model_id)
         model_id = args.model_id
     else:
-        SAVED_MODEL_PATH = "./saved_model"
+        SAVED_MODEL_PATH = os.path.join(PROJECT_ROOT, "saved_model")
         model_id = None
     
     print(f"\n测试参数:")
@@ -435,11 +446,11 @@ def main():
     print("加载测试数据")
     print("=" * 60)
     
-    test_dataset = load_split_data(data_dir="split_data", data_type="test",
+    test_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="test",
                                    dataset_id=args.dataset_id, split_id=args.split_id)
     if test_dataset is None:
         print("未找到划分后的测试数据，使用完整数据进行测试...")
-        test_dataset = load_real_data(data_dir="processed_data")
+        test_dataset = load_real_data(data_dir=os.path.join(PROJECT_ROOT, "processed_data"))
         if test_dataset is None:
             print("未找到真实数据，使用模拟数据进行测试...")
             test_dataset = generate_mock_data(100)
