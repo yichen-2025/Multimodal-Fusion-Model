@@ -54,9 +54,9 @@ def test_clean_data():
 @pytest.fixture(scope="module")
 def cleaned_data(test_clean_data):
     """执行数据清洗"""
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
-    from data_cleaning import clean_data as dc_clean_data
+    from scripts.data_cleaning import clean_data as dc_clean_data
     
     input_dir = test_clean_data
     output_dir = TEST_PROCESSED_DIR
@@ -82,9 +82,9 @@ def cleaned_data(test_clean_data):
 @pytest.fixture(scope="module")
 def extracted_subset(cleaned_data):
     """提取数据集子集"""
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
-    from extract_subset import extract_subset
+    from scripts.extract_subset import extract_subset
     
     success, dataset_id = extract_subset(
         num_samples=1000,
@@ -113,9 +113,9 @@ def extracted_subset(cleaned_data):
 @pytest.fixture(scope="module")
 def split_data(extracted_subset):
     """划分训练集和测试集"""
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
-    from split_modality import split_modality
+    from scripts.split_modality import split_modality
     
     dataset_id = TEST_DATASET_ID
     split_modality(
@@ -138,9 +138,9 @@ def split_data(extracted_subset):
 @pytest.fixture(scope="module")
 def trained_model(split_data):
     """训练模型"""
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
-    from train import train_model
+    from scripts.train import train_model
     
     _, dataset_id, split_id = split_data
     
@@ -370,7 +370,7 @@ class TestEncoders:
     """测试编码器功能"""
     
     def test_numeric_encoder(self, split_data):
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         
         from src.model_architectures.numeric_encoder import NumericEncoder
         
@@ -386,7 +386,7 @@ class TestEncoders:
         assert output.shape == (10, 128), f"NumericEncoder输出形状不正确，期望(10, 128)，实际{output.shape}"
     
     def test_bert_encoder(self, split_data):
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         
         from src.model_architectures.bert_encoder import BertEncoder
         
@@ -465,7 +465,7 @@ class TestModelTesting:
     """测试模型测试功能"""
     
     def test_model_load(self, trained_model, split_data):
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         
         from src.model_architectures.multi_modal_model import MultiModalFusionModel
         
@@ -480,7 +480,7 @@ class TestModelTesting:
         assert model is not None, "模型加载失败"
     
     def test_model_inference(self, trained_model, split_data):
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         
         from src.model_architectures.multi_modal_model import MultiModalFusionModel
         from src.data.data_loader import load_split_data

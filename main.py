@@ -15,10 +15,10 @@
 
 import os
 
-from extract_subset import extract_subset
-from split_modality import split_modality
-from train import train_model
-from test_model import test_model
+from scripts.extract_subset import extract_subset
+from scripts.split_modality import split_modality
+from scripts.train import train_model
+from scripts.test_model import test_model
 
 
 def create_necessary_directories():
@@ -102,7 +102,7 @@ def main():
     # 输入：data_processing/ 目录下的CSV文件
     # 输出：processed_dataset/processed_dataset.csv
     # ============================================
-    # from data_cleaning import main as run_data_cleaning
+    # from scripts.data_cleaning import main as run_data_cleaning
     # run_data_cleaning()
     
     # ============================================
