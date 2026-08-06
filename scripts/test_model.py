@@ -272,6 +272,16 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
     
     start_time = time.time()
     timestamp = datetime.now().isoformat()
+
+    if not torch.cuda.is_available():
+        print("=" * 60)
+        print("警告: 未检测到GPU (CUDA)！")
+        print("当前将使用CPU运行，模型测试/推理速度会很慢。")
+        print("请确认是否继续...")
+        print("=" * 60)
+        choice = input("输入 'y' 继续使用CPU，输入其他键退出: ")
+        if choice.strip().lower() != 'y':
+            raise RuntimeError("用户选择终止：未检测到GPU。请检查CUDA环境或安装GPU版PyTorch。")
     
     saved_model_path = get_model_path(model_id)
     
@@ -396,6 +406,17 @@ def main():
     parser.add_argument("--split_id", type=int, default=0, help="划分ID")
     parser.add_argument("--no_save_report", action="store_true", help="不保存测试报告")
     args = parser.parse_args()
+
+    if not torch.cuda.is_available():
+        print("=" * 60)
+        print("警告: 未检测到GPU (CUDA)！")
+        print("当前将使用CPU运行，模型测试/推理速度会很慢。")
+        print("请确认是否继续...")
+        print("=" * 60)
+        choice = input("输入 'y' 继续使用CPU，输入其他键退出: ")
+        if choice.strip().lower() != 'y':
+            print("用户选择终止：未检测到GPU。请检查CUDA环境或安装GPU版PyTorch。")
+            return
 
     if args.model_path is None:
         MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "qwen2.5-1.5b")

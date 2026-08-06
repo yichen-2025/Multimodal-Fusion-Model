@@ -111,6 +111,16 @@ def train_model(model_path=None,
         MultiModalFusionModel: 训练完成的模型
     """
     start_time = time.time()
+
+    if not torch.cuda.is_available():
+        print("=" * 60)
+        print("警告: 未检测到GPU (CUDA)！")
+        print("当前将使用CPU运行，模型训练速度会非常慢。")
+        print("请确认是否继续...")
+        print("=" * 60)
+        choice = input("输入 'y' 继续使用CPU，输入其他键退出: ")
+        if choice.strip().lower() != 'y':
+            raise RuntimeError("用户选择终止：未检测到GPU。请检查CUDA环境或安装GPU版PyTorch。")
     
     if model_path is None:
         model_path = os.path.join(PROJECT_ROOT, "models", "qwen2.5-1.5b")

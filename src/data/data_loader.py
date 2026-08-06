@@ -214,6 +214,16 @@ def extract_text_embeddings(text_descriptions, bert_model_name="bert-base-chines
     Returns:
         np.ndarray: BERT嵌入特征数组，形状为 [num_samples, 768]
     """
+    if not torch.cuda.is_available():
+        print("=" * 60)
+        print("警告: 未检测到GPU (CUDA)！")
+        print("当前将使用CPU运行，BERT嵌入提取速度可能极慢。")
+        print("请确认是否继续...")
+        print("=" * 60)
+        choice = input("输入 'y' 继续使用CPU，输入其他键退出: ")
+        if choice.strip().lower() != 'y':
+            raise RuntimeError("用户选择终止：未检测到GPU。请检查CUDA环境或安装GPU版PyTorch。")
+
     # 初始化BERT编码器
     bert_encoder = BertEncoder(bert_model_name=bert_model_name)
     bert_encoder.eval()  # 设置为评估模式

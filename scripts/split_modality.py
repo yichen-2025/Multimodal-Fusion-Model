@@ -76,6 +76,16 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, random_stat
     print("模态分离脚本")
     print("=" * 60)
 
+    if not torch.cuda.is_available():
+        print("=" * 60)
+        print("警告: 未检测到GPU (CUDA)！")
+        print("当前将使用CPU运行，BERT嵌入提取速度可能极慢。")
+        print("请确认是否继续...")
+        print("=" * 60)
+        choice = input("输入 'y' 继续使用CPU，输入其他键退出: ")
+        if choice.strip().lower() != 'y':
+            raise RuntimeError("用户选择终止：未检测到GPU。请检查CUDA环境或安装GPU版PyTorch。")
+
     input_csv = os.path.join(BASE_INPUT_DIR, f"dataset_{dataset_id}.csv")
     
     if split_id is None:
@@ -106,11 +116,44 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, random_stat
     print(f"  - 文本描述数量: {len(text_descriptions)}")
 
     print("\n4. 提取BERT文本嵌入...")
-    bert_encoder = BertEncoder(local_model_path=BERT_MODEL_PATH)
-    bert_encoder.eval()
-    with torch.no_grad():
-        bert_embeddings = bert_encoder(text_descriptions)
-    bert_embeddings = bert_embeddings.cpu().numpy().astype(np.float32)
+    bert_embeddings = None
+    use_cpu_fallback = False
+    
+    for try_batch_size in [16, 8, 4]:
+        try:
+            bert_encoder = BertEncoder(local_model_path=BERT_MODEL_PATH, batch_size=try_batch_size)
+            bert_encoder.eval()
+            with torch.no_grad():
+                bert_embeddings = bert_encoder(text_descriptions)
+            bert_embeddings = bert_embeddings.cpu().numpy().astype(np.float32)
+            break
+        except RuntimeError as e:
+            err_msg = str(e).lower()
+            if "out of memory" in err_msg and try_batch_size > 4:
+                print(f"  - 显存不足 (batch_size={try_batch_size})，尝试更小的批次...")
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                continue
+            elif "out of memory" in err_msg:
+                print(f"  - GPU显存不足，尝试CPU模式（速度较慢）...")
+                use_cpu_fallback = True
+                break
+            else:
+                raise
+    
+    if use_cpu_fallback:
+        try:
+            bert_encoder = BertEncoder(local_model_path=BERT_MODEL_PATH, batch_size=32, force_cpu=True)
+            bert_encoder.eval()
+            with torch.no_grad():
+                bert_embeddings = bert_encoder(text_descriptions)
+            bert_embeddings = bert_embeddings.cpu().numpy().astype(np.float32)
+        except Exception as e:
+            raise RuntimeError(f"BERT嵌入提取失败: {e}")
+    
+    if bert_embeddings is None:
+        raise RuntimeError("BERT嵌入提取失败")
+    
     print(f"  - BERT嵌入维度: {bert_embeddings.shape}")
 
     print("\n5. 提取标签...")
