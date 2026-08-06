@@ -1,0 +1,47 @@
+# Python缓存文件
+__pycache__/
+*.pyc
+*.pyo
+.Python
+.cache/
+
+# 测试缓存
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 数据文件（大型数据集）
+# data_processing/*.csv  # 已取消忽略，用于上传原始数据集
+# data_processing/*.txt  # 已取消忽略，用于上传数据集说明
+processed_dataset/
+split_data/
+
+# 模型文件（预训练模型和训练结果）
+models/
+saved_models/
+
+# 日志文件
+logs/
+
+# 测试报告
+test_reports/
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# PyTorch检查点
+*.pt
+*.pth
+*.bin
+
+# 临时文件
+*.tmp
+*.temp
+*~
+
+# IDE配置
+.vscode/
+.idea/
+*.swp
