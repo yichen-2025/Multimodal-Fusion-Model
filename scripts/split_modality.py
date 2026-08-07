@@ -19,6 +19,7 @@ BASE_INPUT_DIR = os.path.join(PROJECT_ROOT, "processed_dataset")
 BASE_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "split_data")
 BERT_MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "bert")
 TEST_SIZE = 0.2
+VAL_SIZE = 0.1
 
 SELECTED_FEATURES = [
     "Bwd Packet Length Mean",
@@ -70,7 +71,7 @@ def generate_text_description(row):
     return "。".join(parts) + "。"
 
 
-def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, random_state=42):
+def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VAL_SIZE, random_state=42):
     start_time = time.time()
     print("=" * 60)
     print("模态分离脚本")
@@ -161,11 +162,20 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, random_stat
     label_counts = np.unique(labels, return_counts=True)
     print(f"  - 标签分布: {dict(zip(label_counts[0], label_counts[1]))}")
 
-    print("\n6. 数据集划分（训练集/测试集）...")
-    X_train, X_test, bert_train, bert_test, y_train, y_test, df_train, df_test = train_test_split(
-        X_scaled, bert_embeddings, labels, df, test_size=test_size, random_state=random_state, stratify=labels
+    print("\n6. 数据集划分（训练集/验证集/测试集）...")
+    # 第一次划分：分出测试集
+    X_temp, X_test, bert_temp, bert_test, y_temp, y_test, df_temp, df_test = train_test_split(
+        X_scaled, bert_embeddings, labels, df,
+        test_size=test_size, random_state=random_state, stratify=labels
+    )
+    # 第二次划分：从训练集中分出验证集
+    val_ratio = val_size / (1 - test_size)
+    X_train, X_val, bert_train, bert_val, y_train, y_val, df_train, df_val = train_test_split(
+        X_temp, bert_temp, y_temp, df_temp,
+        test_size=val_ratio, random_state=random_state, stratify=y_temp
     )
     print(f"  - 训练集: {len(X_train)}个样本")
+    print(f"  - 验证集: {len(X_val)}个样本")
     print(f"  - 测试集: {len(X_test)}个样本")
 
     print("\n7. 保存模态分离数据（合并为npz格式）...")
@@ -178,6 +188,15 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, random_stat
     
     df_train.to_csv(os.path.join(output_dir, "train_data.csv"), index=False)
     print(f"  - train_data.csv: {df_train.shape[0]}行（文本描述备份）")
+    
+    np.savez(os.path.join(output_dir, "val.npz"),
+             scaled_features=X_val,
+             text_embeddings=bert_val,
+             labels=y_val)
+    print(f"  - val.npz: {X_val.shape[0]}样本（含scaled_features, text_embeddings, labels）")
+    
+    df_val.to_csv(os.path.join(output_dir, "val_data.csv"), index=False)
+    print(f"  - val_data.csv: {df_val.shape[0]}行（文本描述备份）")
     
     np.savez(os.path.join(output_dir, "test.npz"),
              scaled_features=X_test,
@@ -206,8 +225,10 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, random_stat
         'dataset_id': dataset_id,
         'split_id': split_id,
         'train_samples': len(X_train),
+        'val_samples': len(X_val),
         'test_samples': len(X_test),
         'test_size': test_size,
+        'val_size': val_size,
         'random_state': random_state,
         'output_dir': os.path.abspath(output_dir),
         'duration_seconds': duration_seconds
@@ -219,12 +240,13 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, random_stat
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="模态分离脚本，将数据集划分为训练集和测试集")
+    parser = argparse.ArgumentParser(description="模态分离脚本，将数据集划分为训练集、验证集和测试集")
     parser.add_argument("--dataset_id", type=int, default=0, help="数据集ID（默认0）")
     parser.add_argument("--split_id", type=int, default=None, help="划分ID（默认自动递增）")
     parser.add_argument("--test_size", type=float, default=TEST_SIZE, help="测试集比例（默认0.2）")
+    parser.add_argument("--val_size", type=float, default=VAL_SIZE, help="验证集比例（默认0.1）")
     parser.add_argument("--random_state", type=int, default=42, help="随机种子（默认42）")
     args = parser.parse_args()
 
-    success = split_modality(args.dataset_id, args.split_id, args.test_size, args.random_state)
+    success = split_modality(args.dataset_id, args.split_id, args.test_size, args.val_size, args.random_state)
     sys.exit(0 if success else 1)

@@ -303,7 +303,7 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
         print("=" * 60)
     
     model = MultiModalFusionModel.from_pretrained(
-        llm_model_path=llm_model_path,
+        llm_model_path_or_save_dir=llm_model_path,
         save_dir=saved_model_path
     )
     

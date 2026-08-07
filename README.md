@@ -14,38 +14,50 @@
 ## 目录结构
 
 ```
-多模态融合2/
-├── main.py                    # 主入口文件（推荐运行方式）
-├── data_cleaning.py           # 数据清洗脚本
-├── extract_subset.py          # 数据集子集提取脚本
-├── split_modality.py          # 模态分离与数据集划分脚本
-├── train.py                   # 模型训练脚本
-├── test_model.py              # 模型测试脚本
-├── test_project.py            # 项目测试套件
-├── download_bert.py           # BERT模型下载脚本
-├── download_qwen.py           # Qwen模型下载脚本
+Multimodal-Fusion-Model/
+├── main.py                        # 主入口文件（推荐运行方式）
+├── README.md                      # 项目说明文档
+├── 运行步骤.md                    # 详细运行步骤文档
+├── 原理图.png                      # 项目原理图
+├── 数据集处理流程图.png             # 数据处理流程图
+├── .gitignore                     # Git忽略规则
 │
-├── src/                       # 核心源码
+├── scripts/                       # 运行脚本
+│   ├── data_cleaning.py           # 数据清洗脚本
+│   ├── extract_subset.py          # 数据集子集提取脚本
+│   ├── split_modality.py          # 模态分离与数据集划分脚本
+│   ├── train.py                   # 模型训练脚本
+│   └── test_model.py              # 模型测试脚本
+│
+├── tools/                         # 工具脚本
+│   ├── download_bert.py           # BERT模型下载脚本
+│   └── download_qwen.py           # Qwen模型下载脚本
+│
+├── src/                           # 核心源码
 │   ├── data/
-│   │   └── data_loader.py     # 数据加载模块
-│   └── model_architectures/   # 模型架构
-│       ├── bert_encoder.py    # BERT文本编码器
-│       ├── numeric_encoder.py # 数值特征编码器
-│       ├── fusion_projection.py # 特征融合投影层
-│       └── multi_modal_model.py # 多模态融合模型
+│   │   └── data_loader.py         # 数据加载模块
+│   └── model_architectures/       # 模型架构
+│       ├── bert_encoder.py        # BERT文本编码器
+│       ├── numeric_encoder.py     # 数值特征编码器
+│       ├── fusion_projection.py   # 特征融合投影层
+│       └── multi_modal_model.py   # 多模态融合模型
 │
-├── utils/
-│   └── log_utils.py           # 日志记录工具
+├── utils/                         # 工具模块
+│   └── log_utils.py               # 日志记录工具
 │
-├── docs/                      # 文档
-│   └── theory.md              # 项目原理说明
+├── tests/                         # 测试套件
+│   └── test_project.py            # 项目测试
 │
-├── data_processing/           # 原始数据集（需手动放入）
-├── processed_dataset/         # 处理后数据（自动生成）
-├── split_data/                # 划分后数据（自动生成）
-├── saved_models/              # 训练模型（自动生成）
-├── logs/                      # 操作日志（自动生成）
-└── test_reports/              # 测试报告（自动生成）
+├── docs/                          # 文档
+│   ├── theory.md                  # 项目原理说明
+│   └── 下一步改进.md              # 改进计划
+│
+├── data_processing/               # 原始数据集（需手动放入）
+├── processed_dataset/             # 处理后数据（自动生成）
+├── split_data/                    # 划分后数据（自动生成）
+├── saved_models/                  # 训练模型（自动生成）
+├── logs/                          # 操作日志（自动生成）
+└── test_reports/                  # 测试报告（自动生成）
 ```
 
 ## 快速开始
@@ -59,8 +71,8 @@ pip install torch transformers datasets scikit-learn pandas numpy pytest matplot
 ### 2. 下载预训练模型
 
 ```bash
-python download_bert.py
-python download_qwen.py
+python tools/download_bert.py
+python tools/download_qwen.py
 ```
 
 ### 3. 准备数据集
@@ -75,7 +87,7 @@ python download_qwen.py
 
 ```python
 # 步骤1：数据清洗
-from data_cleaning import main as run_data_cleaning
+from scripts.data_cleaning import main as run_data_cleaning
 run_data_cleaning()
 
 # 步骤2：提取子集
@@ -102,7 +114,7 @@ plot_loss_curve(model_id=0)
 **操作**：取消 `main.py` 中步骤1的注释
 
 ```python
-from data_cleaning import main as run_data_cleaning
+from scripts.data_cleaning import main as run_data_cleaning
 run_data_cleaning()
 ```
 
@@ -263,7 +275,7 @@ plot_loss_curve(model_id=0)
 运行项目测试套件验证所有功能：
 
 ```bash
-python -m pytest test_project.py -v
+python -m pytest tests/test_project.py -v
 ```
 
 ## 项目原理

@@ -4,7 +4,9 @@ import argparse
 import os
 import time
 import pandas as pd
-from transformers import Trainer, TrainingArguments, AutoTokenizer, TrainerCallback
+import numpy as np
+from transformers import Trainer, TrainingArguments, AutoTokenizer, TrainerCallback, EarlyStoppingCallback
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.data.data_loader import generate_mock_data, load_real_data, load_split_data, collate_fn
 
@@ -151,10 +153,23 @@ def train_model(model_path=None,
             print("Real data not found, using mock data for testing...")
             train_dataset = generate_mock_data(200)
     
+    val_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="val",
+                                  dataset_id=dataset_id, split_id=split_id)
+    
     tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
 
     def custom_collate(batch):
         return collate_fn(batch, tokenizer=tokenizer)
+
+    def compute_metrics(eval_pred):
+        logits, labels = eval_pred
+        predictions = np.argmax(logits, axis=-1)
+        return {
+            'accuracy': accuracy_score(labels, predictions),
+            'precision': precision_score(labels, predictions, zero_division=0),
+            'recall': recall_score(labels, predictions, zero_division=0),
+            'f1': f1_score(labels, predictions, zero_division=0),
+        }
 
     training_args = TrainingArguments(
         output_dir=output_dir,
@@ -164,9 +179,14 @@ def train_model(model_path=None,
         num_train_epochs=num_train_epochs,
         bf16=True,
         logging_steps=10,
-        save_strategy="no",
         report_to="none",
-        remove_unused_columns=False
+        remove_unused_columns=False,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_f1",
+        greater_is_better=True,
+        save_total_limit=3,
     )
 
     # 创建Loss日志目录
@@ -176,8 +196,13 @@ def train_model(model_path=None,
         model=model,
         args=training_args,
         train_dataset=train_dataset,
+        eval_dataset=val_dataset,
         data_collator=custom_collate,
-        callbacks=[LossLoggerCallback(loss_log_dir)]
+        compute_metrics=compute_metrics,
+        callbacks=[
+            LossLoggerCallback(loss_log_dir),
+            EarlyStoppingCallback(early_stopping_patience=3)
+        ]
     )
 
     print("Starting training...")

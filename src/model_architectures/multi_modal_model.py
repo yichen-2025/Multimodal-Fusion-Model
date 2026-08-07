@@ -70,6 +70,8 @@ class MultiModalFusionModel(nn.Module):
         """
         super().__init__()
 
+        self._keys_to_ignore_on_save = set()
+
         if not torch.cuda.is_available():
             print("=" * 60)
             print("警告: 未检测到GPU (CUDA)！")
@@ -251,6 +253,28 @@ class MultiModalFusionModel(nn.Module):
         """返回LLM对应的tokenizer"""
         return AutoTokenizer.from_pretrained(self.llm.config.name_or_path)
 
+    def state_dict(self, *args, **kwargs):
+        """
+        覆写state_dict，只返回可训练参数（排除冻结的LLM和BERT权重）
+        避免safetensors检测到共享张量（llm.model.embed_tokens.weight与llm.lm_head.weight共享）
+        """
+        full_state = super().state_dict(*args, **kwargs)
+        trainable_state = {
+            k: v for k, v in full_state.items()
+            if not k.startswith('llm.') and not k.startswith('bert_encoder.')
+        }
+        return trainable_state
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        """
+        覆写load_state_dict，只加载可训练参数
+        """
+        filtered_state_dict = {
+            k: v for k, v in state_dict.items()
+            if not k.startswith('llm.') and not k.startswith('bert_encoder.')
+        }
+        return super().load_state_dict(filtered_state_dict, *args, **kwargs)
+
     def save_pretrained(self, save_dir):
         """
         保存模型的可训练参数（不保存冻结的LLM和BERT权重）
@@ -280,26 +304,38 @@ class MultiModalFusionModel(nn.Module):
         print(f"模型可训练参数已保存到 {os.path.abspath(save_dir)}")
 
     @classmethod
-    def from_pretrained(cls, llm_model_path, save_dir):
+    def from_pretrained(cls, llm_model_path_or_save_dir, save_dir=None):
         """
         从保存的参数加载模型
         
+        支持两种调用方式：
+        1. from_pretrained(llm_model_path, save_dir) - 原始方式
+        2. from_pretrained(save_dir) - HuggingFace Trainer兼容方式
+        
         Args:
-            llm_model_path (str): LLM模型路径
-            save_dir (str): 保存的参数目录
+            llm_model_path_or_save_dir (str): LLM模型路径或保存目录
+            save_dir (str, optional): 保存的参数目录（当llm_model_path_or_save_dir为llm_model_path时使用）
             
         Returns:
             MultiModalFusionModel: 加载了训练参数的模型
         """
         import os
         
-        config_path = os.path.join(save_dir, 'pytorch_model.bin')
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"模型文件不存在: {config_path}")
-        
-        state_dict = torch.load(config_path, map_location='cpu')
-        
-        config = state_dict['config']
+        if save_dir is None:
+            save_dir = llm_model_path_or_save_dir
+            config_path = os.path.join(save_dir, 'pytorch_model.bin')
+            if not os.path.exists(config_path):
+                raise FileNotFoundError(f"模型文件不存在: {config_path}")
+            state_dict = torch.load(config_path, map_location='cpu', weights_only=False)
+            config = state_dict['config']
+            llm_model_path = config['llm_model_path']
+        else:
+            llm_model_path = llm_model_path_or_save_dir
+            config_path = os.path.join(save_dir, 'pytorch_model.bin')
+            if not os.path.exists(config_path):
+                raise FileNotFoundError(f"模型文件不存在: {config_path}")
+            state_dict = torch.load(config_path, map_location='cpu', weights_only=False)
+            config = state_dict['config']
         
         model = cls(
             llm_model_path=llm_model_path,
