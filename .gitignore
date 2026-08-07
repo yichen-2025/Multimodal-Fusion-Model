@@ -45,3 +45,6 @@ desktop.ini
 .vscode/
 .idea/
 *.swp
+
+.workbuddy/
+todos/
