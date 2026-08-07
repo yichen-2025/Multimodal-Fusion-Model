@@ -316,20 +316,41 @@ class TestSplitModality:
         assert os.path.exists(os.path.join(split_dir, "test.npz")), "test.npz不存在"
         assert os.path.exists(os.path.join(split_dir, "test_data.csv")), "test_data.csv不存在"
     
+    def test_val_files(self, split_data):
+        split_dir, _, _ = split_data
+        assert os.path.exists(os.path.join(split_dir, "val.npz")), "val.npz不存在"
+        assert os.path.exists(os.path.join(split_dir, "val_data.csv")), "val_data.csv不存在"
+    
+    def test_scaler_file(self, split_data):
+        split_dir, _, _ = split_data
+        scaler_path = os.path.join(split_dir, "train_scaler.npy")
+        assert os.path.exists(scaler_path), "train_scaler.npy不存在"
+        scaler_data = np.load(scaler_path, allow_pickle=True).item()
+        assert 'mean' in scaler_data, "scaler缺少mean参数"
+        assert 'std' in scaler_data, "scaler缺少std参数"
+        assert len(scaler_data['mean']) == 9, f"mean维度不正确，期望9，实际{len(scaler_data['mean'])}"
+        assert len(scaler_data['std']) == 9, f"std维度不正确，期望9，实际{len(scaler_data['std'])}"
+    
     def test_train_test_ratio(self, split_data):
         split_dir, _, _ = split_data
         
         train_data = np.load(os.path.join(split_dir, "train.npz"), allow_pickle=True)
+        val_data = np.load(os.path.join(split_dir, "val.npz"), allow_pickle=True)
         test_data = np.load(os.path.join(split_dir, "test.npz"), allow_pickle=True)
         
         train_size = len(train_data['labels'])
+        val_size = len(val_data['labels'])
         test_size = len(test_data['labels'])
         
-        expected_train_size = 800
+        expected_train_size = 700
+        expected_val_size = 100
         expected_test_size = 200
         
         assert train_size == expected_train_size, f"训练集大小不正确，期望{expected_train_size}，实际{train_size}"
+        assert val_size == expected_val_size, f"验证集大小不正确，期望{expected_val_size}，实际{val_size}"
         assert test_size == expected_test_size, f"测试集大小不正确，期望{expected_test_size}，实际{test_size}"
+        
+        assert train_size + val_size + test_size == 1000, f"总样本数不正确，期望1000，实际{train_size + val_size + test_size}"
     
     def test_split_log_generated(self, split_data):
         """测试数据集划分是否生成日志文件"""
@@ -360,9 +381,11 @@ class TestSplitModality:
         assert 'dataset_id' in log_data, "日志缺少dataset_id字段"
         assert 'split_id' in log_data, "日志缺少split_id字段"
         assert 'train_samples' in log_data, "日志缺少train_samples字段"
+        assert 'val_samples' in log_data, "日志缺少val_samples字段"
         assert 'test_samples' in log_data, "日志缺少test_samples字段"
         
-        assert log_data['train_samples'] == 800, f"日志中训练集样本数不正确，期望800，实际{log_data['train_samples']}"
+        assert log_data['train_samples'] == 700, f"日志中训练集样本数不正确，期望700，实际{log_data['train_samples']}"
+        assert log_data['val_samples'] == 100, f"日志中验证集样本数不正确，期望100，实际{log_data['val_samples']}"
         assert log_data['test_samples'] == 200, f"日志中测试集样本数不正确，期望200，实际{log_data['test_samples']}"
 
 
@@ -473,7 +496,7 @@ class TestModelTesting:
         _, dataset_id, split_id = split_data
         
         model = MultiModalFusionModel.from_pretrained(
-            llm_model_path="./models/qwen2.5-1.5b",
+            llm_model_path_or_save_dir="./models/qwen2.5-1.5b",
             save_dir=model_path
         )
         
@@ -489,7 +512,7 @@ class TestModelTesting:
         _, dataset_id, split_id = split_data
         
         model = MultiModalFusionModel.from_pretrained(
-            llm_model_path="./models/qwen2.5-1.5b",
+            llm_model_path_or_save_dir="./models/qwen2.5-1.5b",
             save_dir=model_path
         )
         model.eval()
