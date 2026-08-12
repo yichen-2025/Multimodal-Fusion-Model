@@ -169,8 +169,8 @@ def main():
     # 输入：ablation_results/ablation_results_时间戳.csv
     # 输出：ablation_results/ablation_comparison.png
     # ============================================
-    results_df = pd.read_csv("ablation_results/ablation_results_from_autodl.csv")
-    plot_f1_comparison(results_df)
+    # results_df = pd.read_csv("ablation_results/ablation_results_时间戳.csv")
+    # plot_f1_comparison(results_df)
     
 
 
