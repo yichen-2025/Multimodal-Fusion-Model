@@ -1,6 +1,6 @@
 # 多模态融合网络流量分类模型
 
-基于多模态融合的网络流量恶意检测模型，结合统计特征模态和文本描述模态进行流量分类。
+基于多模态融合的网络流量恶意检测模型，结合统计特征模态和文本描述模态进行流量分类，并支持消融实验以验证各模态的有效性。
 
 ## 项目简介
 
@@ -9,13 +9,22 @@
 1. **统计特征模态**：9维数值特征（如包长度均值、端口号等）
 2. **文本描述模态**：768维BERT语义嵌入
 
-通过多模态融合技术，将两种模态的特征进行融合，实现更准确的流量分类。
+通过多模态融合技术，将两种模态的特征进行融合，结合LLM（Qwen2.5）进行分类。项目同时提供消融实验功能，可对比不同模态组合的性能。
+
+## 消融实验变体
+
+| 变体 | 数值模态 | 文本模态 | LLM | 描述 |
+|------|---------|---------|-----|------|
+| A0 | ✓ | ✓ | ✓ | 全模型（数值+文本+LLM） |
+| A1 | ✓ | ✗ | ✓ | 仅数值+LLM（无文本） |
+| A2 | ✗ | ✓ | ✓ | 仅文本+LLM（无数值） |
+| A3 | ✓ | ✓ | ✗ | 无LLM（纯MLP分类） |
 
 ## 目录结构
 
 ```
 Multimodal-Fusion-Model/
-├── main.py                        # 主入口文件（推荐运行方式）
+├── main.py                        # 主入口文件
 ├── README.md                      # 项目说明文档
 ├── 原理图.png                      # 项目原理图
 ├── 数据集处理流程图.png             # 数据处理流程图
@@ -25,8 +34,9 @@ Multimodal-Fusion-Model/
 │   ├── data_cleaning.py           # 数据清洗脚本
 │   ├── extract_subset.py          # 数据集子集提取脚本
 │   ├── split_modality.py          # 模态分离与数据集划分脚本
-│   ├── train.py                   # 模型训练脚本
-│   └── test_model.py              # 模型测试脚本
+│   ├── train.py                   # 模型训练脚本（支持消融变体）
+│   ├── test_model.py              # 模型测试脚本
+│   └── run_ablation.py            # 消融实验运行器
 │
 ├── tools/                         # 工具脚本
 │   ├── download_bert.py           # BERT模型下载脚本
@@ -54,6 +64,7 @@ Multimodal-Fusion-Model/
 ├── processed_dataset/             # 处理后数据（自动生成）
 ├── split_data/                    # 划分后数据（自动生成）
 ├── saved_models/                  # 训练模型（自动生成）
+├── ablation_results/              # 消融实验结果（自动生成）
 ├── logs/                          # 操作日志（自动生成）
 └── test_reports/                  # 测试报告（自动生成）
 ```
@@ -95,144 +106,13 @@ success, dataset_id = extract_subset(num_samples=5000, random_state=42)
 dataset_id = 0
 split_modality(dataset_id=dataset_id, test_size=0.2, random_state=42)
 
-# 步骤4：模型训练
-train_model(model_path="./models/qwen2.5-1.5b", dataset_id=0, split_id=0, num_train_epochs=3)
+# 步骤4：消融实验（全变体）
+run_ablation(variants=["A0","A1","A2","A3"], dataset_id=0, split_id=0, repeat=1, seed=42)
 
-# 步骤5：模型测试
-result = test_model(model_id=0, dataset_id=0, split_id=0, verbose=True)
-
-# 步骤6：绘制loss曲线
-plot_loss_curve(model_id=0)
+# 步骤5：绘制消融实验结果
+results_df = pd.read_csv("ablation_results/ablation_results_时间戳.csv")
+plot_f1_comparison(results_df)
 ```
-
-## 运行步骤详解
-
-### 步骤1：数据清洗与预处理
-
-**操作**：取消 `main.py` 中步骤1的注释
-
-```python
-from scripts.data_cleaning import main as run_data_cleaning
-run_data_cleaning()
-```
-
-**运行**：`python main.py`
-
-**输入**：`data_processing/` 目录下的CSV文件
-
-**输出**：`processed_dataset/processed_dataset.csv`
-
-**处理内容**：缺失值处理、异常值检测、标签编码（BENIGN→0, DDoS→1）
-
-### 步骤2：提取数据集子集
-
-**操作**：取消 `main.py` 中步骤2的注释
-
-```python
-success, dataset_id = extract_subset(
-    num_samples=5000,
-    # dataset_id=0,  # 可选：指定数据集ID
-    random_state=42
-)
-```
-
-**运行**：`python main.py`
-
-**参数说明**：
-- `num_samples`: 提取样本数量（默认5000）
-- `dataset_id`: 数据集ID（默认自动递增）
-- `random_state`: 随机种子（默认42）
-
-**输出**：
-- `processed_dataset/dataset_X.csv`（子集数据）
-- `processed_dataset/subset_X_scaled_features.npy`（标准化特征）
-- `processed_dataset/subset_X_labels.npy`（标签）
-
-### 步骤3：模态分离与数据集划分
-
-**操作**：取消 `main.py` 中步骤3的注释
-
-```python
-dataset_id = 0
-split_modality(
-    dataset_id=dataset_id,
-    # split_id=0,  # 可选：指定划分ID
-    test_size=0.2,
-    random_state=42
-)
-```
-
-**运行**：`python main.py`
-
-**参数说明**：
-- `dataset_id`: 数据集ID（默认0）
-- `split_id`: 划分ID（默认自动递增）
-- `test_size`: 测试集比例（默认0.2）
-
-**输出**：`split_data/dataset_X/split_Y/`
-- `train.npz`（训练集：统计特征 + BERT嵌入 + 标签）
-- `test.npz`（测试集：统计特征 + BERT嵌入 + 标签）
-
-### 步骤4：模型训练
-
-**操作**：取消 `main.py` 中步骤4的注释
-
-```python
-train_model(
-    model_path="./models/qwen2.5-1.5b",
-    # model_id=0,  # 可选：指定模型ID
-    dataset_id=0,
-    split_id=0,
-    per_device_train_batch_size=2,
-    gradient_accumulation_steps=4,
-    learning_rate=1e-4,
-    num_train_epochs=3
-)
-```
-
-**运行**：`python main.py`
-
-**参数说明**：
-- `model_path`: LLM模型路径（默认`./models/qwen2.5-1.5b`）
-- `model_id`: 模型ID（默认自动递增）
-- `learning_rate`: 学习率（默认1e-4）
-- `num_train_epochs`: 训练轮数（默认3）
-
-**输出**：`saved_models/model_X/`
-- `pytorch_model.bin`（模型参数）
-- `config.txt`（训练配置）
-- `loss_logs/loss_log.csv`（训练loss记录）
-
-### 步骤5：模型测试
-
-**操作**：取消 `main.py` 中步骤5的注释
-
-```python
-result = test_model(
-    model_id=0,
-    dataset_id=0,
-    split_id=0,
-    verbose=True
-)
-```
-
-**运行**：`python main.py`
-
-**输出**：
-- 控制台打印评估指标（准确率、精确率、召回率、F1值）
-- `test_reports/report_X.json`（测试报告）
-
-### 步骤6：绘制loss曲线
-
-**操作**：取消 `main.py` 中步骤6的注释
-
-```python
-plot_loss_curve(model_id=0)
-```
-
-**运行**：`python main.py`
-
-**效果**：弹出窗口显示训练loss变化曲线
 
 ## 主键体系
 
@@ -283,6 +163,7 @@ python -m pytest tests/test_project.py -v
 1. **统计特征模态**：从网络流量中提取9维数值特征（如包长度均值、端口号等），通过数值编码器进行处理
 2. **文本描述模态**：将流量特征转换为自然语言描述，使用预训练BERT模型提取768维语义嵌入
 3. **融合投影层**：将两种模态的特征进行融合，通过投影层映射到统一的特征空间
-4. **分类器**：基于融合特征进行流量分类，区分正常流量（BENIGN）和恶意流量（DDoS）
+4. **LLM分类**：融合特征输入Qwen2.5 LLM，利用其推理能力进行流量分类
+5. **消融实验**：通过控制各模态的启用状态，验证各组件对分类性能的贡献
 
 模型架构参考 `原理图.png`，数据处理流程参考 `数据集处理流程图.png`。
