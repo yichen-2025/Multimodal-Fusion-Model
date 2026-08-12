@@ -1,4 +1,7 @@
 import os
+
+os.environ["HF_HUB_DISABLE_XET"] = "1"
+
 from huggingface_hub import snapshot_download
 
 MODEL_NAME = "bert-base-chinese"

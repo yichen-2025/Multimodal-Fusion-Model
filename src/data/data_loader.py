@@ -236,24 +236,24 @@ def extract_text_embeddings(text_descriptions, bert_model_name="bert-base-chines
     return embeddings.cpu().numpy()
 
 
-def collate_fn(batch, tokenizer=None, max_length=128):
+def collate_fn(batch, tokenizer=None, max_length=128, 
+               use_numeric=True, use_bert=True, use_llm=True):
     """
     数据批处理函数（用于DataLoader）
     
     功能：将多个样本整理成一个batch，处理数值特征、文本特征和标签的对齐
+    支持消融实验配置：可选择性地忽略数值模态、文本模态或LLM
     
     Args:
         batch (list): 样本列表，每个样本是包含stat、bert、label、text的字典
         tokenizer (optional): LLM的tokenizer，用于文本编码
         max_length (int): 文本最大长度，默认为128
+        use_numeric (bool): 是否使用数值模态，False时返回零张量
+        use_bert (bool): 是否使用文本模态，False时返回零张量
+        use_llm (bool): 是否使用LLM，False时不返回input_ids和attention_mask
         
     Returns:
-        dict: 整理后的batch数据，包含：
-            - stat_tensor: 数值特征张量，形状 [batch_size, 9]
-            - bert_tensor: BERT特征张量，形状 [batch_size, 768]
-            - input_ids (可选): 文本token id，形状 [batch_size, seq_len]
-            - attention_mask (可选): 注意力掩码，形状 [batch_size, seq_len]
-            - labels: 分类标签张量，形状 [batch_size]
+        dict: 整理后的batch数据
     """
     if isinstance(batch, list) and len(batch) > 0:
         if isinstance(batch[0], dict) and "stat" in batch[0]:
@@ -267,34 +267,40 @@ def collate_fn(batch, tokenizer=None, max_length=128):
     else:
         raise ValueError(f"Unexpected batch format: {type(batch)}")
     
-    stats = torch.tensor([x["stat"] for x in batch], dtype=torch.float32)
-    berts = torch.tensor([x["bert"] for x in batch], dtype=torch.float32)
+    batch_size = len(batch)
+    
+    # 根据配置处理数值特征
+    if use_numeric:
+        stats = torch.tensor([x["stat"] for x in batch], dtype=torch.float32)
+    else:
+        stats = torch.zeros(batch_size, 9, dtype=torch.float32)
+    
+    # 根据配置处理BERT特征
+    if use_bert:
+        berts = torch.tensor([x["bert"] for x in batch], dtype=torch.float32)
+    else:
+        berts = torch.zeros(batch_size, 768, dtype=torch.float32)
+    
     labels = torch.tensor([x["label"] for x in batch], dtype=torch.long)
 
-    # 如果提供了tokenizer且样本中包含文本
-    if tokenizer is not None and "text" in batch[0]:
-        # 提取所有文本描述
+    # 构建返回字典
+    result = {
+        "stat_tensor": stats,
+        "bert_tensor": berts,
+        "labels": labels
+    }
+
+    # 仅在使用LLM时生成input_ids和attention_mask
+    if use_llm and tokenizer is not None and "text" in batch[0]:
         texts = [x["text"] for x in batch]
-        # 使用tokenizer对文本进行编码
         encodings = tokenizer(
             texts,
-            padding=True,       # 填充到batch中最长文本长度
-            truncation=True,    # 超长文本截断
-            max_length=max_length,  # 最大长度限制
-            return_tensors="pt"     # 返回PyTorch张量
+            padding=True,
+            truncation=True,
+            max_length=max_length,
+            return_tensors="pt"
         )
-        # 返回包含文本编码的完整batch
-        return {
-            "stat_tensor": stats,
-            "bert_tensor": berts,
-            "input_ids": encodings["input_ids"],
-            "attention_mask": encodings["attention_mask"],
-            "labels": labels
-        }
-    else:
-        # 返回不包含文本编码的batch
-        return {
-            "stat_tensor": stats,
-            "bert_tensor": berts,
-            "labels": labels
-        }
+        result["input_ids"] = encodings["input_ids"]
+        result["attention_mask"] = encodings["attention_mask"]
+
+    return result

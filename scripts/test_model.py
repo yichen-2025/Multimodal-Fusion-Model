@@ -19,15 +19,15 @@ REPORTS_DIR = os.path.join(PROJECT_ROOT, "test_reports")
 INDEX_FILE = os.path.join(REPORTS_DIR, "reports_index.csv")
 
 
-def evaluate_model(model, dataset, tokenizer, device):
+def evaluate_model(model, dataset, tokenizer=None, device=None):
     """
     在测试集上评估模型性能
     
     Args:
-        model (MultiModalFusionModel): 训练好的多模态融合模型
-        dataset (datasets.Dataset): 测试数据集
-        tokenizer: LLM的tokenizer
-        device (torch.device): 运行设备
+        model: 训练好的多模态融合模型
+        dataset: 测试数据集
+        tokenizer: LLM的tokenizer（无LLM时可为None）
+        device: 运行设备
         
     Returns:
         dict: 评估指标字典
@@ -35,6 +35,9 @@ def evaluate_model(model, dataset, tokenizer, device):
     model.eval()
     all_preds = []
     all_labels = []
+    
+    if device is None:
+        device = model.device
     
     with torch.no_grad():
         for i in range(len(dataset)):
@@ -47,7 +50,12 @@ def evaluate_model(model, dataset, tokenizer, device):
             stat_vector = stat_vector.to(dtype=target_dtype)
             bert_tensor = bert_tensor.to(dtype=target_dtype)
             
-            outputs = model(stat_vector, bert_tensor)
+            # 无LLM时只传stat和bert
+            if model.use_llm and tokenizer is not None:
+                outputs = model(stat_vector, bert_tensor)
+            else:
+                outputs = model(stat_vector, bert_tensor)
+            
             logits = outputs["logits"]
             pred = torch.argmax(logits, dim=1).item()
             
@@ -55,9 +63,9 @@ def evaluate_model(model, dataset, tokenizer, device):
             all_labels.append(label)
     
     accuracy = accuracy_score(all_labels, all_preds)
-    precision = precision_score(all_labels, all_preds, average='binary')
-    recall = recall_score(all_labels, all_preds, average='binary')
-    f1 = f1_score(all_labels, all_preds, average='binary')
+    precision = precision_score(all_labels, all_preds, average='binary', zero_division=0)
+    recall = recall_score(all_labels, all_preds, average='binary', zero_division=0)
+    f1 = f1_score(all_labels, all_preds, average='binary', zero_division=0)
     cm = confusion_matrix(all_labels, all_preds)
     
     return {
@@ -74,9 +82,6 @@ def evaluate_model(model, dataset, tokenizer, device):
 def print_evaluation_results(results):
     """
     打印评估结果
-    
-    Args:
-        results (dict): 评估指标字典
     """
     print("=" * 60)
     print("模型评估结果")
@@ -136,40 +141,6 @@ def get_next_report_id():
 def save_test_report(report_data):
     """
     保存测试报告
-    
-    功能：将测试报告保存到test_reports目录，包括：
-    1. 详细报告保存为JSON文件（report_{report_id}.json）
-    2. 索引信息保存到CSV文件（reports_index.csv）
-    
-    Args:
-        report_data (dict): 测试报告数据字典
-            必须包含字段：
-                - report_id: int
-                - timestamp: str (ISO格式)
-                - model_id: int
-                - dataset_id: int
-                - split_id: int
-                - test_samples: int
-                - test_positive: int
-                - test_negative: int
-                - accuracy: float
-                - precision: float
-                - recall: float
-                - f1: float
-                - tp: int
-                - tn: int
-                - fp: int
-                - fn: int
-                - duration_seconds: float
-            可选字段（用于扩展）：
-                - model_path: str
-                - llm_model_path: str
-                - device: str
-                - model_config: dict
-                - ... (可任意扩展)
-    
-    Returns:
-        int: 报告ID
     """
     os.makedirs(REPORTS_DIR, exist_ok=True)
     
@@ -204,7 +175,14 @@ def save_test_report(report_data):
         'tn': report_data.get('tn', ''),
         'fp': report_data.get('fp', ''),
         'fn': report_data.get('fn', ''),
-        'duration_seconds': report_data.get('duration_seconds', '')
+        'duration_seconds': report_data.get('duration_seconds', ''),
+        'variant': report_data.get('variant', ''),
+        'use_numeric': report_data.get('use_numeric', ''),
+        'use_bert': report_data.get('use_bert', ''),
+        'use_llm': report_data.get('use_llm', ''),
+        'fusion_type': report_data.get('fusion_type', ''),
+        'bert_trainable': report_data.get('bert_trainable', ''),
+        'trainable_params': report_data.get('trainable_params', ''),
     }
     
     if os.path.exists(INDEX_FILE):
@@ -218,7 +196,9 @@ def save_test_report(report_data):
                 df = pd.DataFrame(columns=['report_id', 'timestamp', 'model_id', 'dataset_id', 'split_id',
                                            'test_samples', 'test_positive', 'test_negative',
                                            'accuracy', 'precision', 'recall', 'f1',
-                                           'tp', 'tn', 'fp', 'fn', 'duration_seconds'])
+                                           'tp', 'tn', 'fp', 'fn', 'duration_seconds',
+                                           'variant', 'use_numeric', 'use_bert', 'use_llm',
+                                           'fusion_type', 'bert_trainable', 'trainable_params'])
         df = pd.concat([df, pd.DataFrame([csv_row])], ignore_index=True)
     else:
         df = pd.DataFrame([csv_row])
@@ -236,36 +216,6 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
                save_report=True):
     """
     使用指定的数据集划分和训练参数测试模型
-    
-    功能：加载指定划分的测试集和指定训练参数的模型，进行评估并返回结果
-    
-    Args:
-        dataset_id (int): 数据集ID，对应dataset_{dataset_id}.csv
-        split_id (int): 划分ID，对应split_data/dataset_{dataset_id}/split_{split_id}/
-        model_id (int): 模型ID，对应saved_models/model_{model_id}/
-        llm_model_path (str): LLM基础模型路径
-        verbose (bool): 是否打印详细信息
-        save_report (bool): 是否保存测试报告
-        
-    Returns:
-        dict: 评估指标字典，与evaluate_model返回结果相同，额外包含report_id字段
-            {
-                'accuracy': float,      # 准确率
-                'precision': float,     # 精确率
-                'recall': float,        # 召回率
-                'f1': float,            # F1分数
-                'confusion_matrix': np.ndarray,  # 混淆矩阵
-                'predictions': list,    # 预测结果列表
-                'labels': list,         # 真实标签列表
-                'report_id': int        # 报告ID（如果保存了报告）
-            }
-    
-    Example:
-        >>> results = test_model(dataset_id=2, split_id=0, model_id=0)
-        >>> print(results['accuracy'])
-        0.95
-        >>> print(results['report_id'])
-        3
     """
     if llm_model_path is None:
         llm_model_path = os.path.join(PROJECT_ROOT, "models", "qwen2.5-1.5b")
@@ -273,16 +223,6 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
     start_time = time.time()
     timestamp = datetime.now().isoformat()
 
-    if not torch.cuda.is_available():
-        print("=" * 60)
-        print("警告: 未检测到GPU (CUDA)！")
-        print("当前将使用CPU运行，模型测试/推理速度会很慢。")
-        print("请确认是否继续...")
-        print("=" * 60)
-        choice = input("输入 'y' 继续使用CPU，输入其他键退出: ")
-        if choice.strip().lower() != 'y':
-            raise RuntimeError("用户选择终止：未检测到GPU。请检查CUDA环境或安装GPU版PyTorch。")
-    
     saved_model_path = get_model_path(model_id)
     
     if verbose:
@@ -307,12 +247,16 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
         save_dir=saved_model_path
     )
     
-    device = next(model.llm.parameters()).device
+    device = model.device
     
     if verbose:
         print(f"模型设备: {device}")
+        print(f"模型配置: use_numeric={model.use_numeric}, use_bert={model.use_bert}, use_llm={model.use_llm}")
     
-    tokenizer = AutoTokenizer.from_pretrained(llm_model_path, local_files_only=True)
+    # 无LLM时不需要tokenizer
+    tokenizer = None
+    if model.use_llm:
+        tokenizer = AutoTokenizer.from_pretrained(llm_model_path, local_files_only=True)
     
     if verbose:
         print("\n" + "=" * 60)
@@ -355,6 +299,9 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
         print(f"\n测试耗时: {duration_seconds:.2f}秒")
         print(f"测试完成！")
     
+    # 计算可训练参数量
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
     if save_report:
         report_data = {
             'report_id': get_next_report_id(),
@@ -377,7 +324,20 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
             'fn': fn,
             'duration_seconds': duration_seconds,
             'device': str(device),
-            'model_config': {}
+            'model_config': {
+                'use_numeric': model.use_numeric,
+                'use_bert': model.use_bert,
+                'use_llm': model.use_llm,
+                'fusion_type': model.fusion_type,
+                'bert_trainable': model.bert_trainable
+            },
+            'variant': None,
+            'use_numeric': model.use_numeric,
+            'use_bert': model.use_bert,
+            'use_llm': model.use_llm,
+            'fusion_type': model.fusion_type,
+            'bert_trainable': model.bert_trainable,
+            'trainable_params': trainable_params
         }
         
         report_id = save_test_report(report_data)
@@ -395,28 +355,15 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
 def main():
     """
     测试主函数（命令行入口）
-    
-    功能：通过命令行参数指定数据集划分和模型，加载测试集进行评估
     """
-    parser = argparse.ArgumentParser(description="测试多模态融合模型")
+    parser = argparse.ArgumentParser(description="测试多模态融合模型（支持消融实验）")
     parser.add_argument("--model_path", type=str, default=None, help="LLM模型路径")
     parser.add_argument("--model_id", type=int, default=None, help="模型ID（用于从saved_models加载）")
-    parser.add_argument("--saved_model_path", type=str, default=None, help="训练后模型参数路径（与model_id二选一）")
+    parser.add_argument("--saved_model_path", type=str, default=None, help="训练后模型参数路径")
     parser.add_argument("--dataset_id", type=int, default=0, help="数据集ID")
     parser.add_argument("--split_id", type=int, default=0, help="划分ID")
     parser.add_argument("--no_save_report", action="store_true", help="不保存测试报告")
     args = parser.parse_args()
-
-    if not torch.cuda.is_available():
-        print("=" * 60)
-        print("警告: 未检测到GPU (CUDA)！")
-        print("当前将使用CPU运行，模型测试/推理速度会很慢。")
-        print("请确认是否继续...")
-        print("=" * 60)
-        choice = input("输入 'y' 继续使用CPU，输入其他键退出: ")
-        if choice.strip().lower() != 'y':
-            print("用户选择终止：未检测到GPU。请检查CUDA环境或安装GPU版PyTorch。")
-            return
 
     if args.model_path is None:
         MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "qwen2.5-1.5b")
@@ -458,10 +405,13 @@ def main():
         save_dir=SAVED_MODEL_PATH
     )
     
-    device = next(model.llm.parameters()).device
+    device = model.device
     print(f"模型设备: {device}")
+    print(f"模型配置: use_numeric={model.use_numeric}, use_bert={model.use_bert}, use_llm={model.use_llm}")
     
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, local_files_only=True)
+    tokenizer = None
+    if model.use_llm:
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, local_files_only=True)
     
     print("\n" + "=" * 60)
     print("加载测试数据")
@@ -502,6 +452,8 @@ def main():
     print_evaluation_results(results)
     print(f"\n测试耗时: {duration_seconds:.2f}秒")
     
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
     if not args.no_save_report:
         report_data = {
             'report_id': get_next_report_id(),
@@ -524,7 +476,20 @@ def main():
             'fn': fn,
             'duration_seconds': duration_seconds,
             'device': str(device),
-            'model_config': {}
+            'model_config': {
+                'use_numeric': model.use_numeric,
+                'use_bert': model.use_bert,
+                'use_llm': model.use_llm,
+                'fusion_type': model.fusion_type,
+                'bert_trainable': model.bert_trainable
+            },
+            'variant': None,
+            'use_numeric': model.use_numeric,
+            'use_bert': model.use_bert,
+            'use_llm': model.use_llm,
+            'fusion_type': model.fusion_type,
+            'bert_trainable': model.bert_trainable,
+            'trainable_params': trainable_params
         }
         
         report_id = save_test_report(report_data)

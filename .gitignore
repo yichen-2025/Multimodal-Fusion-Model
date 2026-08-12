@@ -25,6 +25,7 @@ logs/
 
 # 测试报告
 test_reports/
+ablation_results/
 
 # 操作系统文件
 .DS_Store

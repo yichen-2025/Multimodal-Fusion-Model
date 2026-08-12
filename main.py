@@ -14,11 +14,13 @@
 """
 
 import os
+import pandas as pd
 
 from scripts.extract_subset import extract_subset
 from scripts.split_modality import split_modality
 from scripts.train import train_model
 from scripts.test_model import test_model
+from scripts.run_ablation import run_ablation, plot_f1_comparison
 
 
 def create_necessary_directories():
@@ -144,61 +146,32 @@ def main():
     # print(f"成功完成模态分离，数据集ID: {dataset_id}")
     
     # ============================================
-    # 步骤4：模型训练
-    # 输入：split_data/dataset_X/split_Y/train.npz
-    # 输出：saved_models/model_Z/
+    # 步骤4：消融实验
+    # 输入：split_data/dataset_X/split_Y/
+    # 输出：ablation_results/ablation_results_时间戳.csv
     # 参数：
-    #   model_path: LLM模型路径（默认./models/qwen2.5-1.5b）
-    #   model_id: 模型ID（默认自动递增）
+    #   variants: 变体列表（默认["A0","A1","A2","A3"]）
     #   dataset_id: 数据集ID（默认0）
     #   split_id: 划分ID（默认0）
-    #   per_device_train_batch_size: 每个设备的batch大小（默认2）
-    #   gradient_accumulation_steps: 梯度累积步数（默认4）
-    #   learning_rate: 学习率（默认1e-4）
-    #   num_train_epochs: 训练轮数（默认3）
+    #   repeat: 重复次数（默认1）
+    #   seed: 随机种子（默认42）
     # ============================================
-    # try:
-    #     train_model(
-    #         model_path="./models/qwen2.5-1.5b",
-    #         # model_id=0,  # 可选：指定模型ID
-    #         dataset_id=0,
-    #         split_id=0,
-    #         per_device_train_batch_size=2,
-    #         gradient_accumulation_steps=4,
-    #         learning_rate=1e-4,
-    #         num_train_epochs=3
-    #     )
-    #     print("训练完成")
-    # except Exception as e:
-    #     print(f"训练出错：{e}")
+    # run_ablation(
+    #     variants=["A0","A1","A2","A3"],
+    #     dataset_id=0,
+    #     split_id=0,
+    #     repeat=1,
+    #     seed=42
+    # )
+
+    # ============================================
+    # 步骤5：绘制消融实验结果
+    # 输入：ablation_results/ablation_results_时间戳.csv
+    # 输出：ablation_results/ablation_comparison.png
+    # ============================================
+    results_df = pd.read_csv("ablation_results/ablation_results_from_autodl.csv")
+    plot_f1_comparison(results_df)
     
-    # ============================================
-    # 步骤5：模型测试
-    # 输入：split_data/dataset_X/split_Y/test.npz + saved_models/model_Z/
-    # 输出：test_reports/report_W.json
-    # 参数：
-    #   model_id: 模型ID（与--saved_model_path二选一）
-    #   saved_model_path: 模型路径（与--model_id二选一）
-    #   dataset_id: 数据集ID（默认0）
-    #   split_id: 划分ID（默认0）
-    #   verbose: 是否打印详细信息（默认True）
-    # ============================================
-    # try:
-    #     result = test_model(
-    #         model_id=0,
-    #         dataset_id=0,
-    #         split_id=0,
-    #         verbose=True
-    #     )
-    # except Exception as e:
-    #     print(f"测试出错：{e}")
-    
-    # ============================================
-    # 步骤6：绘制loss曲线（训练完成后执行）
-    # 参数：
-    #   model_id: 模型ID
-    # ============================================
-    # plot_loss_curve(model_id=0)
 
 
 if __name__ == "__main__":
