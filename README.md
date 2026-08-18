@@ -1,6 +1,6 @@
 # 多模态融合网络流量分类模型
 
-基于多模态融合的网络流量恶意检测模型，结合统计特征模态和文本描述模态进行流量分类，并支持消融实验以验证各模态的有效性。
+基于多模态融合的网络流量恶意检测模型，结合统计特征模态和文本描述模态进行流量分类，并支持消融实验以验证各模态的有效性。项目当前已拓展至**开集未知攻击检测**与**少样本学习**场景，旨在证明LLM在复杂场景下的独特优势。
 
 ## 项目简介
 
@@ -10,6 +10,14 @@
 2. **文本描述模态**：768维BERT语义嵌入
 
 通过多模态融合技术，将两种模态的特征进行融合，结合LLM（Qwen2.5）进行分类。项目同时提供消融实验功能，可对比不同模态组合的性能。
+
+### 核心特性
+
+- **多模态融合**：数值特征与文本语义特征的高效融合
+- **消融实验**：支持A0/A1/A2/A3四种变体对比
+- **开集检测 (OOD)**：通过原型距离检测未知DDoS攻击
+- **LLM路由**：未知样本交由LLM进行语义推理判定
+- **少样本学习**：支持k=5/10/20等少样本训练配置
 
 ## 消融实验变体
 
@@ -26,6 +34,7 @@
 Multimodal-Fusion-Model/
 ├── main.py                        # 主入口文件
 ├── README.md                      # 项目说明文档
+├── IMPLEMENTATION_GUIDE.md        # 实施指南（从零开始）
 ├── 原理图.png                      # 项目原理图
 ├── 数据集处理流程图.png             # 数据处理流程图
 ├── .gitignore                     # Git忽略规则
@@ -36,7 +45,13 @@ Multimodal-Fusion-Model/
 │   ├── split_modality.py          # 模态分离与数据集划分脚本
 │   ├── train.py                   # 模型训练脚本（支持消融变体）
 │   ├── test_model.py              # 模型测试脚本
-│   └── run_ablation.py            # 消融实验运行器
+│   ├── run_ablation.py            # 消融实验运行器
+│   ├── make_openset_split.py      # [P1.1] 构造开集数据集划分
+│   ├── train_ood_head.py          # [P1.2] 训练OOD检测头
+│   ├── run_ood_routing.py         # [P1.3] OOD路由评估
+│   ├── make_fewshot.py            # [P1.4] 构造少样本数据
+│   ├── report_generator.py       # [P1.5] 结果汇总报告生成器
+│   └── run_openworld_experiment.py # [P1.5] 开集少样本全流程实验
 │
 ├── tools/                         # 工具脚本
 │   ├── download_bert.py           # BERT模型下载脚本
@@ -49,7 +64,8 @@ Multimodal-Fusion-Model/
 │       ├── bert_encoder.py        # BERT文本编码器
 │       ├── numeric_encoder.py     # 数值特征编码器
 │       ├── fusion_projection.py   # 特征融合投影层
-│       └── multi_modal_model.py   # 多模态融合模型
+│       ├── multi_modal_model.py   # 多模态融合模型
+│       └── ood_head.py            # OOD检测头（基于原型距离）
 │
 ├── utils/                         # 工具模块
 │   └── log_utils.py               # 日志记录工具
@@ -200,6 +216,124 @@ results_df = pd.read_csv("ablation_results/ablation_results_时间戳.csv")
 plot_f1_comparison(results_df)
 ```
 
+## Phase 1: 开集未知攻击检测 + 少样本学习
+
+Phase 1 旨在制造LLM用武之地，通过对比 A3(无LLM) 与 A0(有LLM) 在开集/少样本场景下的性能差距，证明LLM在复杂场景下的独特价值。
+
+### 核心架构：OOD检测头 (OOD Head)
+
+OOD检测头基于**类原型距离**来检测未知样本，实现开集检测能力。
+
+**架构流程**：
+```
+输入: A3融合特征 (batch, 1536维)
+  │
+  ├── 计算与每个类原型（可学习向量）的距离
+  ├── 距离 → 温度缩放 → softmax → 已知类概率
+  ├── 最小距离 > 自适应阈值? → 标记为 unknown
+  │
+输出: {distances, scores, unknown_mask, pred_labels}
+```
+
+**关键设计**：
+- **可训练原型**：每个已知类一个可学习的原型向量（`nn.Parameter`）
+- **距离度量**：支持欧氏距离/余弦距离/马氏距离
+- **自适应阈值**：在验证集上搜索最优F1对应的阈值
+- **Center-Loss**：训练时拉近同类特征与原型的距离
+
+### 开集路由机制
+
+```
+测试样本
+  │
+  ├── 提取A3融合特征
+  ├── OODHead 判定
+  │
+  ├── known (distance ≤ threshold)
+  │   └── A3分类器 → 预测 benign / known_DDoS
+  │
+  └── unknown (distance > threshold)
+      └── A0 (Qwen LLM) → 语义推理 → "正常流量" or "DDoS攻击"
+```
+
+### 执行步骤
+
+#### Step 1 — 构造开集数据
+
+从闭集数据构造开集划分，分离"已知DDoS"和"未知DDoS"。
+
+```bash
+python scripts/make_openset_split.py --dataset_id 1 --source_split_id 0 --unknown_ratio 0.3
+```
+
+产物：`split_data/dataset_1/split_openset_0/`（训练集含已知，测试集含已知+未知）
+
+#### Step 2 — 构造少样本数据
+
+为每个已知类抽取 k 条样本，构造少样本数据。
+
+```bash
+python scripts/make_fewshot.py --dataset_id 1 --source_split_id 0 --k_values "5,10,20"
+```
+
+产物：`split_fewshot_5_0/`、`split_fewshot_10_0/`、`split_fewshot_20_0/`
+
+#### Step 3 — 训练 OOD 检测头
+
+冻结A3 backbone，仅训练原型向量。
+
+```bash
+# 对每个k值训练
+python scripts/train_ood_head.py --model_id <A3_model_id> --dataset_id 1 --split_id 0 --fewshot_k 5
+python scripts/train_ood_head.py --model_id <A3_model_id> --dataset_id 1 --split_id 0 --fewshot_k 10
+python scripts/train_ood_head.py --model_id <A3_model_id> --dataset_id 1 --split_id 0
+```
+
+#### Step 4 — 运行 OOD 路由评估
+
+```bash
+python scripts/run_ood_routing.py ^
+    --backbone_model_id <A3_model_id> ^
+    --ood_id <ood_id> ^
+    --llm_model_id <A0_model_id> ^
+    --dataset_id 1 --split_id 0 --fewshot_k 5
+```
+
+#### Step 5 — 一键完整实验
+
+如需自动化运行完整Pipeline：
+
+```bash
+python scripts/run_openworld_experiment.py ^
+    --backbone_model_id <A3_model_id> ^
+    --skip_backbone_train ^
+    --llm_model_id <A0_model_id> ^
+    --k_values "5,10,20,None"
+```
+
+#### Step 6 — 生成汇总报告
+
+```bash
+python scripts/report_generator.py
+```
+
+产物：
+- `openworld_runs_{timestamp}.csv` 每次运行明细
+- `openworld_fewshot.csv` 按k值汇总对比
+- `openworld_experiment_summary_{ts}.md` 可读Markdown报告
+- `openworld_metrics_{timestamp}.json` 结构化指标
+
+### 核心评估指标
+
+| 指标 | 说明 |
+|------|------|
+| Macro-F1 | 三分类（benign/known/unknown）宏平均F1 |
+| **Unknown F1** | 将unknown视为正类的F1（**核心指标**） |
+| Unknown Recall | 未知DDoS被正确检测的比例 |
+| Unknown Leak Rate | 未知DDoS被误判为known的比例 |
+| Benign Recall | 正常流量召回率 |
+| Known DDoS Recall | 已知DDoS召回率 |
+
 ## 主键体系
 
 项目采用三级主键体系管理数据和模型：
@@ -233,6 +367,11 @@ plot_f1_comparison(results_df)
 | 数据划分 | `logs/split/log_X.json` | 时间、数据集ID、划分ID |
 | 模型训练 | `logs/training/log_X.json` | 时间、模型ID、训练参数 |
 | 模型测试 | `test_reports/report_X.json` | 时间、模型ID、评估指标 |
+| 开集划分 | `logs/openset_split/` | 开集划分配置与样本统计 |
+| OOD训练 | `logs/ood_training/` | OOD头训练过程与指标 |
+| OOD路由 | `logs/ood_routing/` | OOD路由评估结果 |
+| 少样本划分 | `logs/fewshot_split/` | 少样本划分配置与样本统计 |
+| 完整实验 | `logs/experiment/` | 完整实验运行记录 |
 
 ### 测试脚本
 
@@ -251,5 +390,8 @@ python -m pytest tests/test_project.py -v
 3. **融合投影层**：将两种模态的特征进行融合，通过投影层映射到统一的特征空间
 4. **LLM分类**：融合特征输入Qwen2.5 LLM，利用其推理能力进行流量分类
 5. **消融实验**：通过控制各模态的启用状态，验证各组件对分类性能的贡献
+6. **开集检测 (OOD)**：基于类原型距离检测未知攻击样本，实现开集识别能力
+7. **LLM路由**：未知样本交由LLM进行语义推理，已知样本走高效的A3分类器
+8. **少样本学习**：在少量训练样本（k=5/10/20）下验证模型的泛化能力
 
 模型架构参考 `原理图.png`，数据处理流程参考 `数据集处理流程图.png`。
