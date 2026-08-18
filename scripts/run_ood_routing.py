@@ -375,8 +375,8 @@ def run_ood_routing(
 
                     # LLM推理
                     llm_result = llm_model.predict(
-                        stat_vector=stat[sample_idx:sample_idx+1],
-                        bert_embedding=bert[sample_idx:sample_idx+1],
+                        stat_vector=stat[sample_idx],
+                        bert_embedding=bert[sample_idx],
                         tokenizer=llm_tokenizer,
                         text_prompt=prompt
                     )
