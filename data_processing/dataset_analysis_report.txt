@@ -1,0 +1,86 @@
+======================================================================
+数据集分析报告
+======================================================================
+
+文件总数: 8
+样本总数: 3,119,345
+属性数量: 85
+
+----------------------------------------------------------------------
+各文件统计
+----------------------------------------------------------------------
+
+文件: Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv
+  样本数量: 225,745
+  标签分布:
+    DDoS:    128,027 条 ( 56.71%)
+    BENIGN:     97,718 条 ( 43.29%)
+
+文件: Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv
+  样本数量: 286,467
+  标签分布:
+    PortScan:    158,930 条 ( 55.48%)
+    BENIGN:    127,537 条 ( 44.52%)
+
+文件: Friday-WorkingHours-Morning.pcap_ISCX.csv
+  样本数量: 191,033
+  标签分布:
+    BENIGN:    189,067 条 ( 98.97%)
+    Bot:      1,966 条 (  1.03%)
+
+文件: Monday-WorkingHours.pcap_ISCX.csv
+  样本数量: 529,918
+  标签分布:
+    BENIGN:    529,918 条 (100.00%)
+
+文件: Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv
+  样本数量: 288,602
+  标签分布:
+    BENIGN:    288,566 条 ( 99.99%)
+    Infiltration:         36 条 (  0.01%)
+
+文件: Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv
+  样本数量: 458,968
+  标签分布:
+    BENIGN:    168,186 条 ( 36.64%)
+    Web Attack  Brute Force:      1,507 条 (  0.33%)
+    Web Attack  XSS:        652 条 (  0.14%)
+    Web Attack  Sql Injection:         21 条 (  0.00%)
+
+文件: Tuesday-WorkingHours.pcap_ISCX.csv
+  样本数量: 445,909
+  标签分布:
+    BENIGN:    432,074 条 ( 96.90%)
+    FTP-Patator:      7,938 条 (  1.78%)
+    SSH-Patator:      5,897 条 (  1.32%)
+
+文件: Wednesday-workingHours.pcap_ISCX.csv
+  样本数量: 692,703
+  标签分布:
+    BENIGN:    440,031 条 ( 63.52%)
+    DoS Hulk:    231,073 条 ( 33.36%)
+    DoS GoldenEye:     10,293 条 (  1.49%)
+    DoS slowloris:      5,796 条 (  0.84%)
+    DoS Slowhttptest:      5,499 条 (  0.79%)
+    Heartbleed:         11 条 (  0.00%)
+
+======================================================================
+全局标签分布
+======================================================================
+  BENIGN:    2,273,097 条 (   72.87%)
+  DoS Hulk:      231,073 条 (    7.41%)
+  PortScan:      158,930 条 (    5.09%)
+  DDoS:      128,027 条 (    4.10%)
+  DoS GoldenEye:       10,293 条 (    0.33%)
+  FTP-Patator:        7,938 条 (    0.25%)
+  SSH-Patator:        5,897 条 (    0.19%)
+  DoS slowloris:        5,796 条 (    0.19%)
+  DoS Slowhttptest:        5,499 条 (    0.18%)
+  Bot:        1,966 条 (    0.06%)
+  Web Attack  Brute Force:        1,507 条 (    0.05%)
+  Web Attack  XSS:          652 条 (    0.02%)
+  Infiltration:           36 条 (    0.00%)
+  Web Attack  Sql Injection:           21 条 (    0.00%)
+  Heartbleed:           11 条 (    0.00%)
+
+类别数量: 15
