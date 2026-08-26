@@ -31,7 +31,10 @@ class MultiModalFusionModel(nn.Module):
                  fusion_type="concat",
                  bert_trainable=False,
                  num_classes=2,
-                 class_weights=None):
+                 class_weights=None,
+                 classifier_type="mlp",
+                 use_temperature=True,
+                 dropout_rate=0.1):
         """
         初始化多模态融合模型
         
@@ -48,6 +51,9 @@ class MultiModalFusionModel(nn.Module):
             bert_trainable (bool): BERT是否可训练
             num_classes (int): 分类类别数
             class_weights (torch.Tensor, optional): 类别权重张量，用于处理类别不平衡
+            classifier_type (str): 分类器类型 "linear" 或 "mlp"
+            use_temperature (bool): 是否使用温度缩放
+            dropout_rate (float): MLP分类器的dropout率
         """
         super().__init__()
 
@@ -58,6 +64,9 @@ class MultiModalFusionModel(nn.Module):
         self.bert_trainable = bert_trainable
         self.num_classes = num_classes
         self.class_weights = class_weights
+        self.classifier_type = classifier_type
+        self.use_temperature = use_temperature
+        self.dropout_rate = dropout_rate
 
         self._keys_to_ignore_on_save = set()
 
@@ -126,7 +135,22 @@ class MultiModalFusionModel(nn.Module):
         self.fusion_projection.to(self.device)
 
         # 初始化分类器
-        self.classifier = nn.Linear(self.hidden_size, num_classes).to(self.device)
+        if classifier_type == "mlp":
+            self.classifier = nn.Sequential(
+                nn.Linear(self.hidden_size, self.hidden_size // 2),
+                nn.LayerNorm(self.hidden_size // 2),
+                nn.GELU(),
+                nn.Dropout(dropout_rate),
+                nn.Linear(self.hidden_size // 2, num_classes)
+            ).to(self.device)
+        else:
+            self.classifier = nn.Linear(self.hidden_size, num_classes).to(self.device)
+
+        # 温度缩放参数
+        if use_temperature:
+            self.temperature = nn.Parameter(torch.ones(1) * 2.0).to(self.device)
+        else:
+            self.temperature = None
 
         # 统一数据类型
         if use_llm:
@@ -137,6 +161,8 @@ class MultiModalFusionModel(nn.Module):
         self.numeric_encoder.to(dtype=dtype)
         self.fusion_projection.to(dtype=dtype)
         self.classifier.to(dtype=dtype)
+        if self.temperature is not None:
+            self.temperature.data = self.temperature.data.to(dtype=dtype)
         if self.bert_encoder is not None:
             self.bert_encoder.to(dtype=dtype)
 
@@ -216,6 +242,10 @@ class MultiModalFusionModel(nn.Module):
 
         # 分类预测
         logits = self.classifier(fusion_output)
+
+        # 温度缩放
+        if self.temperature is not None:
+            logits = logits / self.temperature
 
         # 计算损失
         loss = None
@@ -356,10 +386,16 @@ class MultiModalFusionModel(nn.Module):
             'bert_trainable': self.bert_trainable,
             'num_classes': self.num_classes,
             'has_class_weights': self.class_weights is not None,
+            'classifier_type': self.classifier_type,
+            'use_temperature': self.use_temperature,
+            'dropout_rate': self.dropout_rate,
         }
         
         if self.class_weights is not None:
             config['class_weights'] = self.class_weights.tolist()
+        
+        if self.temperature is not None:
+            config['temperature'] = self.temperature.data.cpu().tolist()
         
         if self.use_llm and self.llm is not None:
             config['llm_model_path'] = self.llm.config.name_or_path
@@ -379,6 +415,9 @@ class MultiModalFusionModel(nn.Module):
             'classifier': self.classifier.state_dict(),
             'config': config
         }
+        
+        if self.temperature is not None:
+            trainable_state['temperature'] = self.temperature.data.cpu()
         
         torch.save(trainable_state, os.path.join(save_dir, 'pytorch_model.bin'))
         print(f"模型可训练参数已保存到 {os.path.abspath(save_dir)}")
@@ -424,6 +463,10 @@ class MultiModalFusionModel(nn.Module):
         if config.get('has_class_weights', False) and 'class_weights' in config:
             class_weights = torch.tensor(config['class_weights'], dtype=torch.float32)
         
+        classifier_type = config.get('classifier_type', 'linear')
+        use_temperature = config.get('use_temperature', False)
+        dropout_rate = config.get('dropout_rate', 0.1)
+        
         model = cls(
             llm_model_path=llm_model_path,
             bert_model_path=config.get('bert_model_path', './models/bert'),
@@ -436,12 +479,18 @@ class MultiModalFusionModel(nn.Module):
             fusion_type=config.get('fusion_type', 'concat'),
             bert_trainable=config.get('bert_trainable', False),
             num_classes=config.get('num_classes', 2),
-            class_weights=class_weights
+            class_weights=class_weights,
+            classifier_type=classifier_type,
+            use_temperature=use_temperature,
+            dropout_rate=dropout_rate
         )
         
         model.numeric_encoder.load_state_dict(state_dict['numeric_encoder'])
         model.fusion_projection.load_state_dict(state_dict['fusion_projection'])
         model.classifier.load_state_dict(state_dict['classifier'])
+        
+        if 'temperature' in state_dict and model.temperature is not None:
+            model.temperature.data.copy_(state_dict['temperature'])
         
         print(f"模型参数已从 {os.path.abspath(save_dir)} 加载")
         return model

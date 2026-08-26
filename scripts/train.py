@@ -6,16 +6,19 @@ import time
 import math
 import pandas as pd
 import numpy as np
-from torch.utils.data import WeightedRandomSampler
-from transformers import Trainer, TrainingArguments, AutoTokenizer, TrainerCallback, EarlyStoppingCallback
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from src.model_architectures.multi_modal_model import MultiModalFusionModel
-from src.data.data_loader import generate_mock_data, load_real_data, load_split_data, collate_fn
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-
 sys.path.insert(0, PROJECT_ROOT)
+
+from torch.utils.data import WeightedRandomSampler
+from transformers import Trainer, TrainingArguments, AutoTokenizer, TrainerCallback, EarlyStoppingCallback
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from src.model_architectures.multi_modal_model import MultiModalFusionModel
+from src.data.data_loader import generate_mock_data, load_real_data, load_split_data, collate_fn
 from utils.log_utils import save_log
 
 
@@ -81,6 +84,156 @@ class LossLoggerCallback(TrainerCallback):
             json_file = os.path.join(self.log_dir, "loss_log.json")
             df.to_json(json_file, orient='records', indent=2)
             print(f"Loss日志(JSON格式)已保存到 {json_file}")
+
+
+class PerClassMetricsCallback(TrainerCallback):
+    """
+    每类指标追踪回调，在每次评估时记录每类的precision/recall/f1
+    """
+    
+    def __init__(self, log_dir, num_classes, label_names=None):
+        self.log_dir = log_dir
+        self.num_classes = num_classes
+        self.label_names = label_names or {i: str(i) for i in range(num_classes)}
+        self.metrics_log = []
+        os.makedirs(log_dir, exist_ok=True)
+    
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+        """评估时记录每类指标"""
+        eval_output = kwargs.get('eval_output', None)
+        if eval_output is not None and hasattr(eval_output, 'predictions'):
+            preds = eval_output.predictions
+            labels = eval_output.label_ids
+            predictions = np.argmax(preds, axis=-1) if preds.ndim > 1 else preds
+            
+            per_class_precision = precision_score(labels, predictions, average=None, zero_division=0)
+            per_class_recall = recall_score(labels, predictions, average=None, zero_division=0)
+            per_class_f1 = f1_score(labels, predictions, average=None, zero_division=0)
+            
+            entry = {
+                'epoch': state.epoch,
+                'step': state.global_step,
+            }
+            for i in range(self.num_classes):
+                name = self.label_names.get(i, str(i))
+                entry[f'precision_{i}_{name}'] = per_class_precision[i] if i < len(per_class_precision) else 0.0
+                entry[f'recall_{i}_{name}'] = per_class_recall[i] if i < len(per_class_recall) else 0.0
+                entry[f'f1_{i}_{name}'] = per_class_f1[i] if i < len(per_class_f1) else 0.0
+            
+            self.metrics_log.append(entry)
+    
+    def on_train_end(self, args, state, control, **kwargs):
+        """训练结束时保存每类指标"""
+        if self.metrics_log:
+            df = pd.DataFrame(self.metrics_log)
+            metrics_file = os.path.join(self.log_dir, "per_class_metrics.csv")
+            df.to_csv(metrics_file, index=False)
+            print(f"\n每类指标日志已保存到 {metrics_file}")
+
+
+def generate_confusion_matrix(model, eval_dataset, device, save_path, label_names=None, tokenizer=None, use_llm=True):
+    """
+    生成并保存混淆矩阵可视化
+    
+    Args:
+        model: 训练好的模型
+        eval_dataset: 评估数据集（HuggingFace Dataset，包含 stat, bert, label, text 字段）
+        device: 计算设备
+        save_path: 保存路径
+        label_names: 类别名称映射
+        tokenizer: LLM tokenizer（用于文本编码）
+        use_llm: 是否使用LLM
+    """
+    model.eval()
+    all_preds = []
+    all_labels = []
+    
+    batch_size = 32
+    num_samples = len(eval_dataset)
+    num_batches = (num_samples + batch_size - 1) // batch_size
+    
+    with torch.no_grad():
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, num_samples)
+            batch = eval_dataset[start_idx:end_idx]
+            
+            stat_tensor = torch.tensor(batch['stat'], dtype=torch.float32).to(device)
+            bert_tensor = torch.tensor(batch['bert'], dtype=torch.float32).to(device)
+            labels = batch['label']
+            
+            input_ids = None
+            attention_mask = None
+            if use_llm and tokenizer is not None and 'text' in batch:
+                texts = batch['text']
+                if isinstance(texts, list):
+                    encodings = tokenizer(
+                        texts,
+                        padding=True,
+                        truncation=True,
+                        max_length=128,
+                        return_tensors="pt"
+                    )
+                    input_ids = encodings["input_ids"].to(device)
+                    attention_mask = encodings["attention_mask"].to(device)
+            
+            outputs = model(stat_tensor, bert_tensor, input_ids=input_ids, 
+                          attention_mask=attention_mask)
+            logits = outputs['logits']
+            preds = torch.argmax(logits, dim=-1).cpu().numpy()
+            
+            all_preds.extend(preds)
+            all_labels.extend(labels)
+    
+    all_preds = np.array(all_preds)
+    all_labels = np.array(all_labels)
+    
+    num_classes = max(max(all_labels), max(all_preds)) + 1
+    cm = confusion_matrix(all_labels, all_preds, labels=list(range(num_classes)))
+    
+    os.makedirs(save_path, exist_ok=True)
+    
+    cm_file = os.path.join(save_path, "confusion_matrix.csv")
+    cm_df = pd.DataFrame(cm)
+    if label_names:
+        cm_df.columns = [label_names.get(i, str(i)) for i in range(num_classes)]
+        cm_df.index = [label_names.get(i, str(i)) for i in range(num_classes)]
+    cm_df.to_csv(cm_file)
+    print(f"混淆矩阵已保存到 {cm_file}")
+    
+    fig, ax = plt.subplots(figsize=(12, 10))
+    im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    ax.figure.colorbar(im, ax=ax)
+    
+    if label_names:
+        tick_marks = list(range(num_classes))
+        tick_labels = [label_names.get(i, str(i)) for i in range(num_classes)]
+        ax.set_xticks(tick_marks)
+        ax.set_xticklabels(tick_labels, rotation=45, ha='right', fontsize=8)
+        ax.set_yticks(tick_marks)
+        ax.set_yticklabels(tick_labels, fontsize=8)
+    
+    ax.set_ylabel('True label')
+    ax.set_xlabel('Predicted label')
+    ax.set_title('Confusion Matrix')
+    
+    plt.tight_layout()
+    plot_file = os.path.join(save_path, "confusion_matrix.png")
+    plt.savefig(plot_file, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"混淆矩阵图已保存到 {plot_file}")
+    
+    per_class_recall = recall_score(all_labels, all_preds, average=None, zero_division=0)
+    per_class_f1 = f1_score(all_labels, all_preds, average=None, zero_division=0)
+    
+    print("\n各类别性能:")
+    for i in range(num_classes):
+        name = label_names.get(i, str(i)) if label_names else str(i)
+        recall = per_class_recall[i] if i < len(per_class_recall) else 0.0
+        f1 = per_class_f1[i] if i < len(per_class_f1) else 0.0
+        print(f"  类别 {i} ({name}): Recall={recall:.4f}, F1={f1:.4f}")
+    
+    return cm
 
 
 def get_next_model_id(base_dir=None):
@@ -190,7 +343,10 @@ def train_model(model_path=None,
                 use_weighted_sampler=True,
                 warmup_ratio=0.1,
                 weight_decay=0.01,
-                max_grad_norm=1.0):
+                max_grad_norm=1.0,
+                classifier_type="mlp",
+                use_temperature=True,
+                dropout_rate=0.1):
     """
     训练多模态融合模型
     
@@ -218,6 +374,9 @@ def train_model(model_path=None,
         warmup_ratio (float): 预热比例
         weight_decay (float): 权重衰减
         max_grad_norm (float): 梯度裁剪范数
+        classifier_type (str): 分类器类型 "linear" 或 "mlp"
+        use_temperature (bool): 是否使用温度缩放
+        dropout_rate (float): MLP分类器的dropout率
         
     Returns:
         MultiModalFusionModel: 训练完成的模型
@@ -317,7 +476,10 @@ def train_model(model_path=None,
         fusion_type=fusion_type,
         bert_trainable=bert_trainable,
         num_classes=num_classes,
-        class_weights=class_weights
+        class_weights=class_weights,
+        classifier_type=classifier_type,
+        use_temperature=use_temperature,
+        dropout_rate=dropout_rate
     )
     
     # 无LLM时不需要tokenizer
@@ -337,9 +499,12 @@ def train_model(model_path=None,
         predictions = np.argmax(logits, axis=-1)
         return {
             'accuracy': accuracy_score(labels, predictions),
-            'precision': precision_score(labels, predictions, average='macro', zero_division=0),
-            'recall': recall_score(labels, predictions, average='macro', zero_division=0),
-            'f1': f1_score(labels, predictions, average='macro', zero_division=0),
+            'macro_precision': precision_score(labels, predictions, average='macro', zero_division=0),
+            'macro_recall': recall_score(labels, predictions, average='macro', zero_division=0),
+            'macro_f1': f1_score(labels, predictions, average='macro', zero_division=0),
+            'weighted_precision': precision_score(labels, predictions, average='weighted', zero_division=0),
+            'weighted_recall': recall_score(labels, predictions, average='weighted', zero_division=0),
+            'weighted_f1': f1_score(labels, predictions, average='weighted', zero_division=0),
         }
 
     # 无LLM变体使用float32，不需要bf16
@@ -360,7 +525,7 @@ def train_model(model_path=None,
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
-        metric_for_best_model="eval_f1",
+        metric_for_best_model="eval_macro_f1",
         greater_is_better=True,
         save_total_limit=3,
         seed=seed,
@@ -374,7 +539,19 @@ def train_model(model_path=None,
     # 创建Loss日志目录
     loss_log_dir = os.path.join(save_path, "loss_logs")
     
+    # 加载标签映射（用于混淆矩阵和每类指标）
+    try:
+        from scripts.split_modality import LABEL_MAPPING
+        label_names = LABEL_MAPPING
+    except ImportError:
+        try:
+            from split_modality import LABEL_MAPPING
+            label_names = LABEL_MAPPING
+        except ImportError:
+            label_names = {i: str(i) for i in range(num_classes)}
+    
     callbacks = [LossLoggerCallback(loss_log_dir)]
+    callbacks.append(PerClassMetricsCallback(loss_log_dir, num_classes, label_names))
     # 无LLM变体收敛快，减小早停patience
     if use_llm:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=3))
@@ -408,6 +585,24 @@ def train_model(model_path=None,
     os.makedirs(save_path, exist_ok=True)
     model.save_pretrained(save_path)
     
+    # 生成混淆矩阵
+    if val_dataset is not None:
+        print("\n生成混淆矩阵...")
+        try:
+            generate_confusion_matrix(
+                model=model,
+                eval_dataset=val_dataset,
+                device=model.device,
+                save_path=save_path,
+                label_names=label_names,
+                tokenizer=tokenizer,
+                use_llm=use_llm
+            )
+        except Exception as e:
+            print(f"混淆矩阵生成失败: {e}")
+            import traceback
+            traceback.print_exc()
+    
     # 保存配置信息
     with open(os.path.join(save_path, "config.txt"), "w") as f:
         f.write(f"model_id: {model_id}\n")
@@ -432,6 +627,9 @@ def train_model(model_path=None,
         f.write(f"warmup_ratio: {warmup_ratio}\n")
         f.write(f"weight_decay: {weight_decay}\n")
         f.write(f"max_grad_norm: {max_grad_norm}\n")
+        f.write(f"classifier_type: {classifier_type}\n")
+        f.write(f"use_temperature: {use_temperature}\n")
+        f.write(f"dropout_rate: {dropout_rate}\n")
         f.write(f"duration_seconds: {duration_seconds}\n")
     
     print(f"模型配置已保存到 {os.path.join(save_path, 'config.txt')}")
@@ -465,7 +663,10 @@ def train_model(model_path=None,
         'use_weighted_sampler': use_weighted_sampler,
         'warmup_ratio': warmup_ratio,
         'weight_decay': weight_decay,
-        'max_grad_norm': max_grad_norm
+        'max_grad_norm': max_grad_norm,
+        'classifier_type': classifier_type,
+        'use_temperature': use_temperature,
+        'dropout_rate': dropout_rate
     }
     log_id = save_log('training', log_data)
     print(f"\n模型训练日志已保存: logs/training/log_{log_id}.json")
@@ -496,6 +697,9 @@ if __name__ == "__main__":
     parser.add_argument("--warmup_ratio", type=float, default=0.1, help="预热比例")
     parser.add_argument("--weight_decay", type=float, default=0.01, help="权重衰减")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="梯度裁剪范数")
+    parser.add_argument("--classifier_type", type=str, default="mlp", help="分类器类型: linear 或 mlp")
+    parser.add_argument("--disable_temperature", action='store_true', help="禁用温度缩放")
+    parser.add_argument("--dropout_rate", type=float, default=0.1, help="MLP分类器dropout率")
     args = parser.parse_args()
 
     train_model(
@@ -519,5 +723,8 @@ if __name__ == "__main__":
         use_weighted_sampler=not args.disable_weighted_sampler,
         warmup_ratio=args.warmup_ratio,
         weight_decay=args.weight_decay,
-        max_grad_norm=args.max_grad_norm
+        max_grad_norm=args.max_grad_norm,
+        classifier_type=args.classifier_type,
+        use_temperature=not args.disable_temperature,
+        dropout_rate=args.dropout_rate
     )

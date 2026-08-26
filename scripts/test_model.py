@@ -7,13 +7,15 @@ import json
 import time
 from datetime import datetime
 import pandas as pd
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, PROJECT_ROOT)
+
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report
 from transformers import AutoTokenizer
 from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.data.data_loader import load_real_data, generate_mock_data, load_split_data
-
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
 REPORTS_DIR = os.path.join(PROJECT_ROOT, "test_reports")
 INDEX_FILE = os.path.join(REPORTS_DIR, "reports_index.csv")
