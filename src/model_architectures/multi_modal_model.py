@@ -1,9 +1,61 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from .numeric_encoder import NumericEncoder
 from .bert_encoder import BertEncoder
 from .fusion_projection import FeatureFusionProjection
+
+
+class FocalLoss(nn.Module):
+    """
+    Focal Loss 损失函数
+    适用于类别不平衡场景，通过降低易分类样本的权重，聚焦于难分类样本
+    
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+    
+    Args:
+        alpha (torch.Tensor, optional): 类别权重张量，形状为 [num_classes]
+        gamma (float): 聚焦参数，默认2.0。值越大，对难分类样本的关注越多
+    """
+    
+    def __init__(self, alpha=None, gamma=2.0):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+    
+    def forward(self, logits, targets):
+        """
+        Args:
+            logits: 模型输出的 logits，形状为 [batch_size, num_classes]
+            targets: 真实标签，形状为 [batch_size]
+        """
+        # 计算 log_softmax
+        log_probs = F.log_softmax(logits, dim=1)
+        probs = torch.exp(log_probs)
+        
+        # 获取目标类别的 log 概率
+        batch_size = logits.size(0)
+        num_classes = logits.size(1)
+        
+        # 对目标类别进行 one-hot 编码
+        targets_one_hot = F.one_hot(targets, num_classes=num_classes).float()
+        
+        # 计算每个样本在目标类别上的概率
+        pt = (probs * targets_one_hot).sum(dim=1)
+        log_pt = (log_probs * targets_one_hot).sum(dim=1)
+        
+        # Focal Loss 的调制因子
+        focal_weight = (1 - pt) ** self.gamma
+        
+        # 类别加权
+        if self.alpha is not None:
+            alpha_t = self.alpha[targets]
+            focal_loss = -alpha_t * focal_weight * log_pt
+        else:
+            focal_loss = -focal_weight * log_pt
+        
+        return focal_loss.mean()
 
 
 class MultiModalFusionModel(nn.Module):
@@ -34,7 +86,12 @@ class MultiModalFusionModel(nn.Module):
                  class_weights=None,
                  classifier_type="mlp",
                  use_temperature=True,
-                 dropout_rate=0.1):
+                 dropout_rate=0.1,
+                 use_focal_loss=False,
+                 focal_gamma=2.0,
+                 use_prototype_learning=False,
+                 prototype_temperature=0.07,
+                 prototype_loss_weight=0.1):
         """
         初始化多模态融合模型
         
@@ -54,6 +111,11 @@ class MultiModalFusionModel(nn.Module):
             classifier_type (str): 分类器类型 "linear" 或 "mlp"
             use_temperature (bool): 是否使用温度缩放
             dropout_rate (float): MLP分类器的dropout率
+            use_focal_loss (bool): 是否使用Focal Loss
+            focal_gamma (float): Focal Loss的聚焦参数
+            use_prototype_learning (bool): 是否使用类别原型对比学习
+            prototype_temperature (float): 原型对比学习的温度参数
+            prototype_loss_weight (float): 原型对比学习损失的权重
         """
         super().__init__()
 
@@ -67,6 +129,11 @@ class MultiModalFusionModel(nn.Module):
         self.classifier_type = classifier_type
         self.use_temperature = use_temperature
         self.dropout_rate = dropout_rate
+        self.use_focal_loss = use_focal_loss
+        self.focal_gamma = focal_gamma
+        self.use_prototype_learning = use_prototype_learning
+        self.prototype_temperature = prototype_temperature
+        self.prototype_loss_weight = prototype_loss_weight
 
         self._keys_to_ignore_on_save = set()
 
@@ -152,6 +219,29 @@ class MultiModalFusionModel(nn.Module):
         else:
             self.temperature = None
 
+        # 类别原型（用于对比学习）
+        if use_prototype_learning:
+            self.class_prototypes = nn.Parameter(
+                torch.randn(num_classes, self.hidden_size) * 0.02
+            ).to(self.device)
+            self.prototype_projection = nn.Sequential(
+                nn.Linear(self.hidden_size, self.hidden_size),
+                nn.ReLU(),
+                nn.Linear(self.hidden_size, self.hidden_size)
+            ).to(self.device)
+        else:
+            self.class_prototypes = None
+            self.prototype_projection = None
+
+        # Focal Loss 损失函数
+        if use_focal_loss:
+            self.focal_loss_fn = FocalLoss(
+                alpha=class_weights,
+                gamma=focal_gamma
+            )
+        else:
+            self.focal_loss_fn = None
+
         # 统一数据类型
         if use_llm:
             dtype = next(self.llm.parameters()).dtype
@@ -165,6 +255,10 @@ class MultiModalFusionModel(nn.Module):
             self.temperature.data = self.temperature.data.to(dtype=dtype)
         if self.bert_encoder is not None:
             self.bert_encoder.to(dtype=dtype)
+        if self.class_prototypes is not None:
+            self.class_prototypes.data = self.class_prototypes.data.to(dtype=dtype)
+        if self.prototype_projection is not None:
+            self.prototype_projection.to(dtype=dtype)
 
     def forward(self, stat_tensor, bert_tensor, input_ids=None, attention_mask=None, labels=None,
                 return_features=False):
@@ -243,6 +337,17 @@ class MultiModalFusionModel(nn.Module):
         # 分类预测
         logits = self.classifier(fusion_output)
 
+        # 类别原型对比学习：将原型相似度添加到 logits
+        if self.use_prototype_learning and self.class_prototypes is not None:
+            # 投影融合特征到原型空间
+            projected_fusion = self.prototype_projection(fusion_output)
+            # 计算融合特征与各类别原型的余弦相似度
+            normed_fusion = F.normalize(projected_fusion, p=2, dim=1)
+            normed_prototypes = F.normalize(self.class_prototypes, p=2, dim=1)
+            prototype_similarities = torch.matmul(normed_fusion, normed_prototypes.t())
+            # 缩放相似度并添加到 logits
+            logits = logits + prototype_similarities / self.prototype_temperature
+
         # 温度缩放
         if self.temperature is not None:
             logits = logits / self.temperature
@@ -251,11 +356,39 @@ class MultiModalFusionModel(nn.Module):
         loss = None
         if labels is not None:
             labels = labels.to(self.device)
-            if self.class_weights is not None:
-                loss_fn = nn.CrossEntropyLoss(weight=self.class_weights.to(self.device))
+            
+            # 主分类损失
+            if self.use_focal_loss and self.focal_loss_fn is not None:
+                classification_loss = self.focal_loss_fn(logits, labels)
             else:
-                loss_fn = nn.CrossEntropyLoss()
-            loss = loss_fn(logits, labels)
+                if self.class_weights is not None:
+                    loss_fn = nn.CrossEntropyLoss(weight=self.class_weights.to(self.device))
+                else:
+                    loss_fn = nn.CrossEntropyLoss()
+                classification_loss = loss_fn(logits, labels)
+            
+            # 原型对比损失
+            prototype_loss = torch.tensor(0.0, device=self.device, dtype=logits.dtype)
+            if self.use_prototype_learning and self.class_prototypes is not None:
+                # 计算样本特征与所属类别原型的对比损失
+                normed_fusion = F.normalize(self.prototype_projection(fusion_output), p=2, dim=1)
+                normed_prototypes = F.normalize(self.class_prototypes, p=2, dim=1)
+                
+                # 获取每个样本对应类别的原型
+                batch_prototypes = normed_prototypes[labels]  # [batch_size, hidden_size]
+                
+                # 正样本对的相似度
+                positive_similarity = (normed_fusion * batch_prototypes).sum(dim=1) / self.prototype_temperature
+                
+                # 所有原型的相似度
+                all_similarities = torch.matmul(normed_fusion, normed_prototypes.t()) / self.prototype_temperature
+                
+                # InfoNCE loss
+                prototype_loss = -positive_similarity + torch.logsumexp(all_similarities, dim=1)
+                prototype_loss = prototype_loss.mean()
+            
+            # 总损失
+            loss = classification_loss + self.prototype_loss_weight * prototype_loss
 
         return_dict = {"logits": logits, "loss": loss}
 
@@ -389,6 +522,11 @@ class MultiModalFusionModel(nn.Module):
             'classifier_type': self.classifier_type,
             'use_temperature': self.use_temperature,
             'dropout_rate': self.dropout_rate,
+            'use_focal_loss': self.use_focal_loss,
+            'focal_gamma': self.focal_gamma,
+            'use_prototype_learning': self.use_prototype_learning,
+            'prototype_temperature': self.prototype_temperature,
+            'prototype_loss_weight': self.prototype_loss_weight,
         }
         
         if self.class_weights is not None:
@@ -418,6 +556,12 @@ class MultiModalFusionModel(nn.Module):
         
         if self.temperature is not None:
             trainable_state['temperature'] = self.temperature.data.cpu()
+        
+        if self.class_prototypes is not None:
+            trainable_state['class_prototypes'] = self.class_prototypes.data.cpu()
+        
+        if self.prototype_projection is not None:
+            trainable_state['prototype_projection'] = self.prototype_projection.state_dict()
         
         torch.save(trainable_state, os.path.join(save_dir, 'pytorch_model.bin'))
         print(f"模型可训练参数已保存到 {os.path.abspath(save_dir)}")
@@ -466,6 +610,11 @@ class MultiModalFusionModel(nn.Module):
         classifier_type = config.get('classifier_type', 'linear')
         use_temperature = config.get('use_temperature', False)
         dropout_rate = config.get('dropout_rate', 0.1)
+        use_focal_loss = config.get('use_focal_loss', False)
+        focal_gamma = config.get('focal_gamma', 2.0)
+        use_prototype_learning = config.get('use_prototype_learning', False)
+        prototype_temperature = config.get('prototype_temperature', 0.07)
+        prototype_loss_weight = config.get('prototype_loss_weight', 0.1)
         
         model = cls(
             llm_model_path=llm_model_path,
@@ -482,7 +631,12 @@ class MultiModalFusionModel(nn.Module):
             class_weights=class_weights,
             classifier_type=classifier_type,
             use_temperature=use_temperature,
-            dropout_rate=dropout_rate
+            dropout_rate=dropout_rate,
+            use_focal_loss=use_focal_loss,
+            focal_gamma=focal_gamma,
+            use_prototype_learning=use_prototype_learning,
+            prototype_temperature=prototype_temperature,
+            prototype_loss_weight=prototype_loss_weight
         )
         
         model.numeric_encoder.load_state_dict(state_dict['numeric_encoder'])
@@ -491,6 +645,12 @@ class MultiModalFusionModel(nn.Module):
         
         if 'temperature' in state_dict and model.temperature is not None:
             model.temperature.data.copy_(state_dict['temperature'])
+        
+        if 'class_prototypes' in state_dict and model.class_prototypes is not None:
+            model.class_prototypes.data.copy_(state_dict['class_prototypes'])
+        
+        if 'prototype_projection' in state_dict and model.prototype_projection is not None:
+            model.prototype_projection.load_state_dict(state_dict['prototype_projection'])
         
         print(f"模型参数已从 {os.path.abspath(save_dir)} 加载")
         return model

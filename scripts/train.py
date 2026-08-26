@@ -17,17 +17,66 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from src.model_architectures.multi_modal_model import MultiModalFusionModel
+from src.model_architectures.multi_modal_model import MultiModalFusionModel, FocalLoss
 from src.data.data_loader import generate_mock_data, load_real_data, load_split_data, collate_fn
 from utils.log_utils import save_log
 
 
+def augmentation_collate_fn(batch, tokenizer=None, max_length=128,
+                            use_numeric=True, use_bert=True, use_llm=True,
+                            noise_std=0.01, augmentation_prob=0.5):
+    """
+    带数据增强的批处理函数
+    
+    功能：在标准collate_fn基础上，对数值特征添加随机高斯噪声增强
+    
+    Args:
+        batch: 样本列表
+        tokenizer: LLM tokenizer
+        max_length: 文本最大长度
+        use_numeric: 是否使用数值模态
+        use_bert: 是否使用文本模态
+        use_llm: 是否使用LLM
+        noise_std: 高斯噪声标准差
+        augmentation_prob: 应用增强的概率
+        
+    Returns:
+        dict: 整理后的batch数据
+    """
+    # 先使用标准collate_fn处理
+    result = collate_fn(batch, tokenizer, max_length, use_numeric, use_bert, use_llm)
+    
+    # 对数值特征进行数据增强
+    if use_numeric and noise_std > 0:
+        stat_tensor = result["stat_tensor"]
+        batch_size = stat_tensor.shape[0]
+        
+        # 随机决定哪些样本应用增强
+        mask = torch.rand(batch_size, 1) < augmentation_prob
+        noise = torch.randn_like(stat_tensor) * noise_std
+        stat_tensor = stat_tensor + mask.float() * noise
+        
+        result["stat_tensor"] = stat_tensor
+    
+    return result
+
+
 # 消融实验变体配置映射
 VARIANT_CONFIGS = {
+    # 基础模态消融
     "A0": {"use_numeric": True,  "use_bert": True,  "use_llm": True,  "fusion_type": "concat", "bert_trainable": False},
     "A1": {"use_numeric": True,  "use_bert": False, "use_llm": True,  "fusion_type": "concat", "bert_trainable": False},
     "A2": {"use_numeric": False, "use_bert": True,  "use_llm": True,  "fusion_type": "concat", "bert_trainable": False},
     "A3": {"use_numeric": True,  "use_bert": True,  "use_llm": False, "fusion_type": "concat", "bert_trainable": False},
+    # 第三阶段改进消融（在A0基础上）
+    "B0": {"use_focal_loss": False, "use_prototype_learning": False, "use_augmentation": False},
+    "B1": {"use_focal_loss": True,  "use_prototype_learning": False, "use_augmentation": False},
+    "B2": {"use_focal_loss": False, "use_prototype_learning": True,  "use_augmentation": False},
+    "B3": {"use_focal_loss": False, "use_prototype_learning": False, "use_augmentation": True},
+    "B4": {"use_focal_loss": True,  "use_prototype_learning": True,  "use_augmentation": False},
+    "B5": {"use_focal_loss": True,  "use_prototype_learning": False, "use_augmentation": True},
+    "B6": {"use_focal_loss": False, "use_prototype_learning": True,  "use_augmentation": True},
+    "B7": {"use_focal_loss": True,  "use_prototype_learning": True,  "use_augmentation": True},
 }
 
 VARIANT_DESCRIPTIONS = {
@@ -35,6 +84,14 @@ VARIANT_DESCRIPTIONS = {
     "A1": "仅数值+LLM（无文本）",
     "A2": "仅文本+LLM（无数值）",
     "A3": "无LLM（纯MLP分类）",
+    "B0": "基线模型（无第三阶段改进）",
+    "B1": "仅Focal Loss",
+    "B2": "仅原型对比学习",
+    "B3": "仅数据增强",
+    "B4": "Focal Loss + 原型对比学习",
+    "B5": "Focal Loss + 数据增强",
+    "B6": "原型对比学习 + 数据增强",
+    "B7": "全部改进（Focal + 原型 + 增强）",
 }
 
 
@@ -346,7 +403,15 @@ def train_model(model_path=None,
                 max_grad_norm=1.0,
                 classifier_type="mlp",
                 use_temperature=True,
-                dropout_rate=0.1):
+                dropout_rate=0.1,
+                use_focal_loss=False,
+                focal_gamma=2.0,
+                use_prototype_learning=False,
+                prototype_temperature=0.07,
+                prototype_loss_weight=0.1,
+                use_augmentation=False,
+                aug_noise_std=0.01,
+                aug_prob=0.5):
     """
     训练多模态融合模型
     
@@ -374,9 +439,17 @@ def train_model(model_path=None,
         warmup_ratio (float): 预热比例
         weight_decay (float): 权重衰减
         max_grad_norm (float): 梯度裁剪范数
-        classifier_type (str): 分类器类型 "linear" 或 "mlp"
+        classifier_type (str): 分类器类型
         use_temperature (bool): 是否使用温度缩放
         dropout_rate (float): MLP分类器的dropout率
+        use_focal_loss (bool): 是否使用Focal Loss
+        focal_gamma (float): Focal Loss的聚焦参数
+        use_prototype_learning (bool): 是否使用类别原型对比学习
+        prototype_temperature (float): 原型对比学习的温度参数
+        prototype_loss_weight (float): 原型对比学习损失的权重
+        use_augmentation (bool): 是否使用数值特征数据增强
+        aug_noise_std (float): 数据增强高斯噪声标准差
+        aug_prob (float): 数据增强应用概率
         
     Returns:
         MultiModalFusionModel: 训练完成的模型
@@ -388,11 +461,30 @@ def train_model(model_path=None,
         if variant not in VARIANT_CONFIGS:
             raise ValueError(f"未知变体: {variant}. 可用变体为: {list(VARIANT_CONFIGS.keys())}")
         config = VARIANT_CONFIGS[variant]
-        use_numeric = config['use_numeric']
-        use_bert = config['use_bert']
-        use_llm = config['use_llm']
-        fusion_type = config['fusion_type']
-        bert_trainable = config['bert_trainable']
+        
+        # A系列：基础模态消融
+        if variant.startswith('A'):
+            use_numeric = config['use_numeric']
+            use_bert = config['use_bert']
+            use_llm = config['use_llm']
+            fusion_type = config['fusion_type']
+            bert_trainable = config['bert_trainable']
+        # B系列：第三阶段改进消融（使用A0作为基础配置）
+        elif variant.startswith('B'):
+            base_config = VARIANT_CONFIGS['A0']
+            use_numeric = base_config['use_numeric']
+            use_bert = base_config['use_bert']
+            use_llm = base_config['use_llm']
+            fusion_type = base_config['fusion_type']
+            bert_trainable = base_config['bert_trainable']
+            
+            # 应用B系列的改进配置
+            if 'use_focal_loss' in config:
+                use_focal_loss = config['use_focal_loss']
+            if 'use_prototype_learning' in config:
+                use_prototype_learning = config['use_prototype_learning']
+            if 'use_augmentation' in config:
+                use_augmentation = config['use_augmentation']
     else:
         # 使用显式传入的参数，默认全部开启
         if use_numeric is None:
@@ -479,7 +571,12 @@ def train_model(model_path=None,
         class_weights=class_weights,
         classifier_type=classifier_type,
         use_temperature=use_temperature,
-        dropout_rate=dropout_rate
+        dropout_rate=dropout_rate,
+        use_focal_loss=use_focal_loss,
+        focal_gamma=focal_gamma,
+        use_prototype_learning=use_prototype_learning,
+        prototype_temperature=prototype_temperature,
+        prototype_loss_weight=prototype_loss_weight
     )
     
     # 无LLM时不需要tokenizer
@@ -488,11 +585,24 @@ def train_model(model_path=None,
         tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
 
     def custom_collate(batch):
-        return collate_fn(batch, 
-                         tokenizer=tokenizer,
-                         use_numeric=use_numeric,
-                         use_bert=use_bert,
-                         use_llm=use_llm)
+        if use_augmentation:
+            return augmentation_collate_fn(
+                batch, 
+                tokenizer=tokenizer,
+                use_numeric=use_numeric,
+                use_bert=use_bert,
+                use_llm=use_llm,
+                noise_std=aug_noise_std,
+                augmentation_prob=aug_prob
+            )
+        else:
+            return collate_fn(
+                batch, 
+                tokenizer=tokenizer,
+                use_numeric=use_numeric,
+                use_bert=use_bert,
+                use_llm=use_llm
+            )
 
     def compute_metrics(eval_pred):
         logits, labels = eval_pred
@@ -630,6 +740,14 @@ def train_model(model_path=None,
         f.write(f"classifier_type: {classifier_type}\n")
         f.write(f"use_temperature: {use_temperature}\n")
         f.write(f"dropout_rate: {dropout_rate}\n")
+        f.write(f"use_focal_loss: {use_focal_loss}\n")
+        f.write(f"focal_gamma: {focal_gamma}\n")
+        f.write(f"use_prototype_learning: {use_prototype_learning}\n")
+        f.write(f"prototype_temperature: {prototype_temperature}\n")
+        f.write(f"prototype_loss_weight: {prototype_loss_weight}\n")
+        f.write(f"use_augmentation: {use_augmentation}\n")
+        f.write(f"aug_noise_std: {aug_noise_std}\n")
+        f.write(f"aug_prob: {aug_prob}\n")
         f.write(f"duration_seconds: {duration_seconds}\n")
     
     print(f"模型配置已保存到 {os.path.join(save_path, 'config.txt')}")
@@ -666,7 +784,15 @@ def train_model(model_path=None,
         'max_grad_norm': max_grad_norm,
         'classifier_type': classifier_type,
         'use_temperature': use_temperature,
-        'dropout_rate': dropout_rate
+        'dropout_rate': dropout_rate,
+        'use_focal_loss': use_focal_loss,
+        'focal_gamma': focal_gamma,
+        'use_prototype_learning': use_prototype_learning,
+        'prototype_temperature': prototype_temperature,
+        'prototype_loss_weight': prototype_loss_weight,
+        'use_augmentation': use_augmentation,
+        'aug_noise_std': aug_noise_std,
+        'aug_prob': aug_prob
     }
     log_id = save_log('training', log_data)
     print(f"\n模型训练日志已保存: logs/training/log_{log_id}.json")
@@ -700,6 +826,14 @@ if __name__ == "__main__":
     parser.add_argument("--classifier_type", type=str, default="mlp", help="分类器类型: linear 或 mlp")
     parser.add_argument("--disable_temperature", action='store_true', help="禁用温度缩放")
     parser.add_argument("--dropout_rate", type=float, default=0.1, help="MLP分类器dropout率")
+    parser.add_argument("--use_focal_loss", action='store_true', help="使用Focal Loss")
+    parser.add_argument("--focal_gamma", type=float, default=2.0, help="Focal Loss聚焦参数")
+    parser.add_argument("--use_prototype_learning", action='store_true', help="使用类别原型对比学习")
+    parser.add_argument("--prototype_temperature", type=float, default=0.07, help="原型对比学习温度参数")
+    parser.add_argument("--prototype_loss_weight", type=float, default=0.1, help="原型对比学习损失权重")
+    parser.add_argument("--use_augmentation", action='store_true', help="使用数值特征数据增强")
+    parser.add_argument("--aug_noise_std", type=float, default=0.01, help="数据增强高斯噪声标准差")
+    parser.add_argument("--aug_prob", type=float, default=0.5, help="数据增强应用概率")
     args = parser.parse_args()
 
     train_model(
@@ -726,5 +860,13 @@ if __name__ == "__main__":
         max_grad_norm=args.max_grad_norm,
         classifier_type=args.classifier_type,
         use_temperature=not args.disable_temperature,
-        dropout_rate=args.dropout_rate
+        dropout_rate=args.dropout_rate,
+        use_focal_loss=args.use_focal_loss,
+        focal_gamma=args.focal_gamma,
+        use_prototype_learning=args.use_prototype_learning,
+        prototype_temperature=args.prototype_temperature,
+        prototype_loss_weight=args.prototype_loss_weight,
+        use_augmentation=args.use_augmentation,
+        aug_noise_std=args.aug_noise_std,
+        aug_prob=args.aug_prob
     )
