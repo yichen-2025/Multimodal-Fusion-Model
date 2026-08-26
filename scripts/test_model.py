@@ -63,9 +63,9 @@ def evaluate_model(model, dataset, tokenizer=None, device=None):
             all_labels.append(label)
     
     accuracy = accuracy_score(all_labels, all_preds)
-    precision = precision_score(all_labels, all_preds, average='binary', zero_division=0)
-    recall = recall_score(all_labels, all_preds, average='binary', zero_division=0)
-    f1 = f1_score(all_labels, all_preds, average='binary', zero_division=0)
+    precision = precision_score(all_labels, all_preds, average='macro', zero_division=0)
+    recall = recall_score(all_labels, all_preds, average='macro', zero_division=0)
+    f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
     cm = confusion_matrix(all_labels, all_preds)
     
     return {
@@ -87,26 +87,33 @@ def print_evaluation_results(results):
     print("模型评估结果")
     print("=" * 60)
     print(f"\n准确率 (Accuracy): {results['accuracy']:.4f}")
-    print(f"精确率 (Precision): {results['precision']:.4f}")
-    print(f"召回率 (Recall): {results['recall']:.4f}")
-    print(f"F1分数 (F1 Score): {results['f1']:.4f}")
+    print(f"宏平均精确率 (Macro-Precision): {results['precision']:.4f}")
+    print(f"宏平均召回率 (Macro-Recall): {results['recall']:.4f}")
+    print(f"宏平均F1 (Macro-F1): {results['f1']:.4f}")
     
     print("\n混淆矩阵 (Confusion Matrix):")
     cm = results['confusion_matrix']
-    print(f"              预测正常  预测恶意")
-    print(f"实际正常      {cm[0][0]:>8d}    {cm[0][1]:>8d}")
-    print(f"实际恶意      {cm[1][0]:>8d}    {cm[1][1]:>8d}")
+    print(cm)
     
-    tp = cm[1][1]
-    tn = cm[0][0]
-    fp = cm[0][1]
-    fn = cm[1][0]
-    
-    print(f"\n分类详情:")
-    print(f"  - 真阳性 (TP): {tp} (实际恶意，预测恶意)")
-    print(f"  - 真阴性 (TN): {tn} (实际正常，预测正常)")
-    print(f"  - 假阳性 (FP): {fp} (实际正常，预测恶意)")
-    print(f"  - 假阴性 (FN): {fn} (实际恶意，预测正常)")
+    unique_labels = sorted(set(results['labels']))
+    if len(unique_labels) <= 2:
+        if len(unique_labels) == 2:
+            tp = cm[1][1]
+            tn = cm[0][0]
+            fp = cm[0][1]
+            fn = cm[1][0]
+            print(f"\n二分类详情:")
+            print(f"  - 真阳性 (TP): {tp}")
+            print(f"  - 真阴性 (TN): {tn}")
+            print(f"  - 假阳性 (FP): {fp}")
+            print(f"  - 假阴性 (FN): {fn}")
+    else:
+        print(f"\n多分类详情 ({len(unique_labels)}类):")
+        for c in unique_labels:
+            if c < len(cm) and cm[c].sum() > 0:
+                correct = cm[c][c] if c < len(cm) and c < len(cm[c]) else 0
+                total = cm[c].sum()
+                print(f"  - 类{c}: {correct}/{total} = {correct/total:.4f}")
     
     print("\n" + "=" * 60)
 
@@ -271,13 +278,11 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
     
     test_samples = len(test_dataset)
     test_labels = [sample['label'] for sample in test_dataset]
-    test_positive = sum(1 for l in test_labels if l == 1)
-    test_negative = test_samples - test_positive
     
     if verbose:
         print(f"测试样本数: {test_samples}")
-        print(f"  - 恶意流量(1): {test_positive}")
-        print(f"  - 正常流量(0): {test_negative}")
+        for lbl, cnt in zip(*np.unique(test_labels, return_counts=True)):
+            print(f"  - 类{lbl}: {cnt}样本")
     
     if verbose:
         print("\n" + "=" * 60)
@@ -289,10 +294,7 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
     duration_seconds = time.time() - start_time
     
     cm = results['confusion_matrix']
-    tp = int(cm[1][1])
-    tn = int(cm[0][0])
-    fp = int(cm[0][1])
-    fn = int(cm[1][0])
+    num_classes = len(cm)
     
     if verbose:
         print_evaluation_results(results)
@@ -312,16 +314,11 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
             'dataset_id': dataset_id,
             'split_id': split_id,
             'test_samples': test_samples,
-            'test_positive': test_positive,
-            'test_negative': test_negative,
+            'num_classes': num_classes,
             'accuracy': results['accuracy'],
             'precision': results['precision'],
             'recall': results['recall'],
             'f1': results['f1'],
-            'tp': tp,
-            'tn': tn,
-            'fp': fp,
-            'fn': fn,
             'duration_seconds': duration_seconds,
             'device': str(device),
             'model_config': {
@@ -420,9 +417,17 @@ def evaluate_open_set_model(model, dataset, tokenizer=None, device=None, num_kno
         results['unknown_f1'] = 0.0
 
     results['confusion_matrix'] = confusion_matrix(true_arr, pred_arr).tolist()
-    target_names = ['BENIGN', 'known_DDoS', 'unknown_DDoS'][:max(3, len(set(true_arr.tolist() + pred_arr.tolist())))]
+    all_present = sorted(set(true_arr.tolist() + pred_arr.tolist()))
+    label_names = {
+        0: "BENIGN", 1: "DoS Hulk", 2: "DoS GoldenEye", 3: "DoS slowloris",
+        4: "DoS Slowhttptest", 5: "DDoS", 6: "PortScan", 7: "FTP-Patator",
+        8: "SSH-Patator", 9: "Bot", 10: "Web Attack - Brute Force",
+        11: "Web Attack - XSS", 12: "Web Attack - Sql Injection",
+        13: "Infiltration", 14: "Heartbleed"
+    }
+    target_names = [label_names.get(l, f"class_{l}") for l in all_present]
     results['classification_report'] = classification_report(
-        true_arr, pred_arr, target_names=target_names[:len(set(true_arr.tolist() + pred_arr.tolist()))],
+        true_arr, pred_arr, target_names=target_names,
         zero_division=0, output_dict=True
     )
     results['predictions'] = all_preds
@@ -439,12 +444,21 @@ def print_open_set_results(results):
     print(f"\n整体准确率: {results['accuracy']:.4f}")
     print(f"Macro-F1: {results['macro_f1']:.4f}")
 
+    label_names = {
+        0: "BENIGN", 1: "DoS Hulk", 2: "DoS GoldenEye", 3: "DoS slowloris",
+        4: "DoS Slowhttptest", 5: "DDoS", 6: "PortScan", 7: "FTP-Patator",
+        8: "SSH-Patator", 9: "Bot", 10: "Web Attack - Brute Force",
+        11: "Web Attack - XSS", 12: "Web Attack - Sql Injection",
+        13: "Infiltration", 14: "Heartbleed"
+    }
+
     if 'known_accuracy' in results:
         print(f"\n已知类准确率: {results['known_accuracy']:.4f}")
-        for c in range(2):
-            if f'class_{c}_recall' in results:
-                name = {0: 'BENIGN', 1: 'known_DDoS'}.get(c, str(c))
-                print(f"  {name} 召回率: {results[f'class_{c}_recall']:.4f}")
+        for key, val in results.items():
+            if key.endswith('_recall') and key.startswith('class_'):
+                c = int(key.replace('class_', '').replace('_recall', ''))
+                name = label_names.get(c, f"class_{c}")
+                print(f"  {name}({c}) 召回率: {val:.4f}")
 
     if 'unknown_recall' in results:
         print(f"\n未知类召回率: {results['unknown_recall']:.4f}")
@@ -535,12 +549,10 @@ def main():
     
     test_samples = len(test_dataset)
     test_labels = [sample['label'] for sample in test_dataset]
-    test_positive = sum(1 for l in test_labels if l == 1)
-    test_negative = test_samples - test_positive
     
     print(f"测试样本数: {test_samples}")
-    print(f"  - 恶意流量(1): {test_positive}")
-    print(f"  - 正常流量(0): {test_negative}")
+    for lbl, cnt in zip(*np.unique(test_labels, return_counts=True)):
+        print(f"  - 类{lbl}: {cnt}样本")
     
     print("\n" + "=" * 60)
     print("开始评估...")
@@ -551,10 +563,6 @@ def main():
     duration_seconds = time.time() - start_time
     
     cm = results['confusion_matrix']
-    tp = int(cm[1][1])
-    tn = int(cm[0][0])
-    fp = int(cm[0][1])
-    fn = int(cm[1][0])
     
     print_evaluation_results(results)
     print(f"\n测试耗时: {duration_seconds:.2f}秒")
@@ -571,16 +579,11 @@ def main():
             'dataset_id': args.dataset_id,
             'split_id': args.split_id,
             'test_samples': test_samples,
-            'test_positive': test_positive,
-            'test_negative': test_negative,
+            'num_classes': len(set(test_labels)),
             'accuracy': results['accuracy'],
             'precision': results['precision'],
             'recall': results['recall'],
             'f1': results['f1'],
-            'tp': tp,
-            'tn': tn,
-            'fp': fp,
-            'fn': fn,
             'duration_seconds': duration_seconds,
             'device': str(device),
             'model_config': {

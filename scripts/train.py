@@ -100,7 +100,8 @@ def train_model(model_path=None,
                 use_llm=None,
                 fusion_type="concat",
                 bert_trainable=False,
-                seed=42):
+                seed=42,
+                num_classes=None):
     """
     训练多模态融合模型
     
@@ -122,6 +123,7 @@ def train_model(model_path=None,
         fusion_type (str): 融合策略
         bert_trainable (bool): BERT是否可训练
         seed (int): 随机种子
+        num_classes (int): 分类类别数（None则自动从数据推断）
         
     Returns:
         MultiModalFusionModel: 训练完成的模型
@@ -185,16 +187,6 @@ def train_model(model_path=None,
     print(f"  - BERT可训练: {'是' if bert_trainable else '否'}")
     print(f"  - 模型保存路径: {save_path}")
 
-    # 初始化模型
-    model = MultiModalFusionModel(
-        llm_model_path=model_path,
-        use_numeric=use_numeric,
-        use_bert=use_bert,
-        use_llm=use_llm,
-        fusion_type=fusion_type,
-        bert_trainable=bert_trainable
-    )
-    
     train_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="train", 
                                     dataset_id=dataset_id, split_id=split_id)
     if train_dataset is None:
@@ -204,8 +196,24 @@ def train_model(model_path=None,
             print("未找到完整处理后的数据，将使用模拟数据进行测试...")
             train_dataset = generate_mock_data(200)
     
+    if num_classes is None:
+        all_labels = [s['label'] for s in train_dataset]
+        num_classes = max(all_labels) + 1
+        print(f"自动检测类别数: {num_classes}")
+    
     val_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="val",
                                   dataset_id=dataset_id, split_id=split_id)
+
+    # 初始化模型（需在 num_classes 确定后）
+    model = MultiModalFusionModel(
+        llm_model_path=model_path,
+        use_numeric=use_numeric,
+        use_bert=use_bert,
+        use_llm=use_llm,
+        fusion_type=fusion_type,
+        bert_trainable=bert_trainable,
+        num_classes=num_classes
+    )
     
     # 无LLM时不需要tokenizer
     tokenizer = None
@@ -224,9 +232,9 @@ def train_model(model_path=None,
         predictions = np.argmax(logits, axis=-1)
         return {
             'accuracy': accuracy_score(labels, predictions),
-            'precision': precision_score(labels, predictions, zero_division=0),
-            'recall': recall_score(labels, predictions, zero_division=0),
-            'f1': f1_score(labels, predictions, zero_division=0),
+            'precision': precision_score(labels, predictions, average='macro', zero_division=0),
+            'recall': recall_score(labels, predictions, average='macro', zero_division=0),
+            'f1': f1_score(labels, predictions, average='macro', zero_division=0),
         }
 
     # 无LLM变体使用float32，不需要bf16
@@ -293,6 +301,7 @@ def train_model(model_path=None,
         f.write(f"use_llm: {use_llm}\n")
         f.write(f"fusion_type: {fusion_type}\n")
         f.write(f"bert_trainable: {bert_trainable}\n")
+        f.write(f"num_classes: {num_classes}\n")
         f.write(f"per_device_train_batch_size: {per_device_train_batch_size}\n")
         f.write(f"gradient_accumulation_steps: {gradient_accumulation_steps}\n")
         f.write(f"learning_rate: {learning_rate}\n")
@@ -316,6 +325,7 @@ def train_model(model_path=None,
         'use_llm': use_llm,
         'fusion_type': fusion_type,
         'bert_trainable': bert_trainable,
+        'num_classes': num_classes,
         'learning_rate': learning_rate,
         'epochs': num_train_epochs,
         'batch_size': per_device_train_batch_size,
@@ -350,6 +360,7 @@ if __name__ == "__main__":
     parser.add_argument("--fusion_type", type=str, default="concat", help="融合策略 concat/add/attention")
     parser.add_argument("--bert_trainable", action='store_true', default=False, help="BERT可训练")
     parser.add_argument("--seed", type=int, default=42, help="随机种子")
+    parser.add_argument("--num_classes", type=int, default=None, help="分类类别数（默认自动检测）")
     args = parser.parse_args()
 
     train_model(
@@ -367,5 +378,6 @@ if __name__ == "__main__":
         use_llm=args.use_llm,
         fusion_type=args.fusion_type,
         bert_trainable=args.bert_trainable,
-        seed=args.seed
+        seed=args.seed,
+        num_classes=args.num_classes
     )

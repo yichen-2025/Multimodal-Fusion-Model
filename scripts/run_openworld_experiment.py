@@ -280,8 +280,10 @@ def run_openworld_experiment(
                 'routed_unknown_f1': routed.get('unknown_f1', 0),
                 'routed_unknown_recall': routed.get('unknown_recall', 0),
                 'routed_accuracy': routed.get('accuracy', 0),
-                'routed_benign_recall': routed.get('per_class', {}).get('BENIGN', {}).get('recall', 0),
-                'routed_known_ddos_recall': routed.get('per_class', {}).get('known_DDoS', {}).get('recall', 0),
+                'routed_per_class_recall': {
+                    name: info.get('recall', 0)
+                    for name, info in routed.get('per_class', {}).items()
+                },
                 'a3_known_accuracy': a3_baseline.get('known_accuracy', 0),
                 'a3_known_macro_f1': a3_baseline.get('known_macro_f1', 0),
                 'a3_unknown_leak_rate': routed.get('unknown_leak_rate', 0),
@@ -366,15 +368,14 @@ def run_openworld_experiment(
         print(f"    LLM: 跳过")
 
     print(f"\n  各k值结果:")
-    print(f"    {'k':>6} | {'Macro-F1':>10} | {'Unknown-F1':>10} | {'Unknown-Recall':>14} | {'Benign-Recall':>14} | {'known-DDoS-Recall':>18}")
-    print(f"    {'-' * 6}-+-{'-' * 10}-+-{'-' * 10}-+-{'-' * 14}-+-{'-' * 14}-+-{'-' * 18}")
+    print(f"    {'k':>6} | {'Macro-F1':>10} | {'Unknown-F1':>10} | {'Unknown-Recall':>14} | {'Accuracy':>10}")
+    print(f"    {'-' * 6}-+-{'-' * 10}-+-{'-' * 10}-+-{'-' * 14}-+-{'-' * 10}")
 
     for k_label, result in sorted(all_k_results.items(), key=lambda x: x[0]):
         print(f"    {k_label:>6} | {result['routed_macro_f1']:>10.4f} | "
               f"{result['routed_unknown_f1']:>10.4f} | "
               f"{result['routed_unknown_recall']:>14.4f} | "
-              f"{result['routed_benign_recall']:>14.4f} | "
-              f"{result['routed_known_ddos_recall']:>18.4f}")
+              f"{result['routed_accuracy']:>10.4f}")
 
     print(f"\n  总耗时: {total_duration:.2f}秒")
     print(f"  实验日志ID: {experiment_log_id}")

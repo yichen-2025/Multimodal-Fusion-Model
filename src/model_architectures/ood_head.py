@@ -30,7 +30,7 @@ class OODHead(nn.Module):
 
         Args:
             feature_dim (int): 输入特征维度（与融合输出一致，默认1536）
-            num_known_classes (int): 已知类别数（默认2: BENIGN + DDoS）
+            num_known_classes (int): 已知类别数（默认2，可扩展到多分类）
             temperature (float): 温度缩放系数（默认1.0）
             distance_type (str): 距离度量类型
                 - 'euclidean': 欧氏距离
@@ -73,7 +73,7 @@ class OODHead(nn.Module):
                 - 'distances': 到每个原型的距离 [batch_size, num_known_classes]
                 - 'scores': OOD异常分数 [batch_size] (越小越可能是已知类)
                 - 'unknown_mask': 布尔掩码，True表示未知 [batch_size]
-                - 'pred_labels': 预测标签 [batch_size] (0=BENIGN, 1=DDoS, 2=unknown)
+                - 'pred_labels': 预测标签 [batch_size] (0..K-1=已知类, K=unknown)
                 - 'known_probs': 已知类的softmax概率 [batch_size, num_known_classes]
         """
         batch_size = features.shape[0]

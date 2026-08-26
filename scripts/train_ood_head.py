@@ -344,11 +344,14 @@ def train_ood_head(
         'distance_type': distance_type,
         'temperature': temperature,
         'ood_threshold': ood_head.ood_threshold,
-        'label_mapping': {
-            '0': 'BENIGN',
-            '1': 'known_DDoS',
-            '2': 'unknown_DDoS'
-        },
+        'label_mapping': {str(i): name for i, name in enumerate([
+            "BENIGN", "DoS Hulk", "DoS GoldenEye", "DoS slowloris",
+            "DoS Slowhttptest", "DDoS", "PortScan", "FTP-Patator",
+            "SSH-Patator", "Bot", "Web Attack - Brute Force",
+            "Web Attack - XSS", "Web Attack - Sql Injection",
+            "Infiltration", "Heartbleed"
+        ][:num_known_classes])},
+        'unknown_label': num_known_classes,
         'creation_time': time.strftime('%Y-%m-%d %H:%M:%S'),
     }
 
@@ -370,7 +373,7 @@ def train_ood_head(
     print("\n" + "-" * 40)
     print("记录日志...")
 
-    train_known = int(np.sum(train_labels == 0)) + int(np.sum(train_labels == 1)) if num_known_classes >= 2 else int(len(train_labels))
+    train_known = int(np.sum(train_labels < num_known_classes))
 
     log_data = {
         'model_id': model_id,

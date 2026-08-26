@@ -5,6 +5,7 @@ import sys
 import argparse
 import torch
 import time
+import json
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from src.model_architectures.bert_encoder import BertEncoder
@@ -32,6 +33,24 @@ SELECTED_FEATURES = [
     "Average Packet Size",
     "Packet Length Std"
 ]
+
+LABEL_MAPPING = {
+    0: "BENIGN",
+    1: "DoS Hulk",
+    2: "DoS GoldenEye",
+    3: "DoS slowloris",
+    4: "DoS Slowhttptest",
+    5: "DDoS",
+    6: "PortScan",
+    7: "FTP-Patator",
+    8: "SSH-Patator",
+    9: "Bot",
+    10: "Web Attack - Brute Force",
+    11: "Web Attack - XSS",
+    12: "Web Attack - Sql Injection",
+    13: "Infiltration",
+    14: "Heartbleed",
+}
 
 
 def get_next_split_id(dataset_id):
@@ -71,10 +90,11 @@ def generate_text_description(row):
     return "。".join(parts) + "。"
 
 
-def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VAL_SIZE, random_state=42):
+def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VAL_SIZE,
+                   random_state=42, input_csv=None):
     start_time = time.time()
     print("=" * 60)
-    print("模态分离脚本")
+    print("模态分离脚本（多分类版）")
     print("=" * 60)
 
     if not torch.cuda.is_available():
@@ -87,7 +107,17 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VA
         if choice.strip().lower() != 'y':
             raise RuntimeError("用户选择终止：未检测到GPU。请检查CUDA环境或安装GPU版PyTorch。")
 
-    input_csv = os.path.join(BASE_INPUT_DIR, f"dataset_{dataset_id}.csv")
+    if input_csv is None:
+        # 优先使用 extract_subset 生成的子集文件 dataset_{id}.csv
+        candidate_subset = os.path.join(BASE_INPUT_DIR, f"dataset_{dataset_id}.csv")
+        if os.path.exists(candidate_subset):
+            input_csv = candidate_subset
+        else:
+            # 回退到完整 processed_dataset.csv（兼容 dataset_id=0 或未生成子集的情况）
+            input_csv = os.path.join(BASE_INPUT_DIR, "processed_dataset.csv")
+
+    if not os.path.exists(input_csv):
+        raise FileNotFoundError(f"未找到处理后的数据文件: {input_csv}\n请先运行 data_cleaning.py 或 extract_subset.py")
     
     if split_id is None:
         split_id = get_next_split_id(dataset_id)
@@ -98,13 +128,18 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VA
     print(f"\n数据集ID: {dataset_id}")
     print(f"划分ID: {split_id}")
 
-    print("\n1. 加载数据集子集...")
+    print("\n1. 加载数据集...")
     df = pd.read_csv(input_csv)
     df.columns = df.columns.str.strip()
     print(f"数据集: {df.shape[0]}行, {df.shape[1]}列")
 
     print("\n2. 统计特征模态（连续特征）...")
-    X = df[SELECTED_FEATURES]
+    available_features = [f for f in SELECTED_FEATURES if f in df.columns]
+    if len(available_features) < len(SELECTED_FEATURES):
+        missing = set(SELECTED_FEATURES) - set(available_features)
+        print(f"  警告: 缺少特征列 {missing}")
+    
+    X = df[available_features]
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X).astype(np.float32)
     print(f"  - 统计特征维度: {X_scaled.shape}")
@@ -160,21 +195,62 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VA
     print("\n5. 提取标签...")
     labels = df['Label'].values.astype(np.int64)
     label_counts = np.unique(labels, return_counts=True)
-    print(f"  - 标签分布: {dict(zip(label_counts[0], label_counts[1]))}")
+    print(f"  - 标签分布:")
+    for lbl, cnt in zip(*label_counts):
+        name = LABEL_MAPPING.get(int(lbl), str(lbl))
+        print(f"    {int(lbl)}: {name} = {cnt}")
 
     print("\n6. 数据集划分（训练集/验证集/测试集）...")
+    min_class_count = min(label_counts[1])
+    stratify_ok = min_class_count >= 3
+    
+    if not stratify_ok:
+        print(f"  警告: 最小类只有 {min_class_count} 样本，部分类别无法分层抽样，改用普通划分...")
+    
     # 第一次划分：分出测试集
-    X_temp, X_test, bert_temp, bert_test, y_temp, y_test, df_temp, df_test = train_test_split(
-        X_scaled, bert_embeddings, labels, df,
-        test_size=test_size, random_state=random_state, stratify=labels
-    )
+    if stratify_ok:
+        try:
+            X_temp, X_test, bert_temp, bert_test, y_temp, y_test, df_temp, df_test = train_test_split(
+                X_scaled, bert_embeddings, labels, df,
+                test_size=test_size, random_state=random_state, stratify=labels
+            )
+        except ValueError:
+            print("  分层划分失败（某些类样本太少），改用普通划分...")
+            X_temp, X_test, bert_temp, bert_test, y_temp, y_test, df_temp, df_test = train_test_split(
+                X_scaled, bert_embeddings, labels, df,
+                test_size=test_size, random_state=random_state
+            )
+    else:
+        X_temp, X_test, bert_temp, bert_test, y_temp, y_test, df_temp, df_test = train_test_split(
+            X_scaled, bert_embeddings, labels, df,
+            test_size=test_size, random_state=random_state
+        )
+    
     # 第二次划分：从训练集中分出验证集
     val_ratio = val_size / (1 - test_size)
-    X_train, X_val, bert_train, bert_val, y_train, y_val, df_train, df_val = train_test_split(
-        X_temp, bert_temp, y_temp, df_temp,
-        test_size=val_ratio, random_state=random_state, stratify=y_temp
-    )
+    temp_min_count = min(np.unique(y_temp, return_counts=True)[1])
+    if temp_min_count >= 3:
+        try:
+            X_train, X_val, bert_train, bert_val, y_train, y_val, df_train, df_val = train_test_split(
+                X_temp, bert_temp, y_temp, df_temp,
+                test_size=val_ratio, random_state=random_state, stratify=y_temp
+            )
+        except ValueError:
+            X_train, X_val, bert_train, bert_val, y_train, y_val, df_train, df_val = train_test_split(
+                X_temp, bert_temp, y_temp, df_temp,
+                test_size=val_ratio, random_state=random_state
+            )
+    else:
+        X_train, X_val, bert_train, bert_val, y_train, y_val, df_train, df_val = train_test_split(
+            X_temp, bert_temp, y_temp, df_temp,
+            test_size=val_ratio, random_state=random_state
+        )
+    
     print(f"  - 训练集: {len(X_train)}个样本")
+    train_counts = np.unique(y_train, return_counts=True)
+    for lbl, cnt in zip(*train_counts):
+        name = LABEL_MAPPING.get(int(lbl), str(lbl))
+        print(f"    {int(lbl)}: {name} = {cnt}")
     print(f"  - 验证集: {len(X_val)}个样本")
     print(f"  - 测试集: {len(X_test)}个样本")
 
@@ -213,6 +289,12 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VA
     })
     print(f"  - train_scaler.npy: 标准化器参数")
 
+    # 保存标签映射
+    mapping_path = os.path.join(output_dir, "label_mapping.json")
+    with open(mapping_path, "w", encoding="utf-8") as f:
+        json.dump(LABEL_MAPPING, f, ensure_ascii=False, indent=2)
+    print(f"  - label_mapping.json: 标签映射表")
+
     duration_seconds = time.time() - start_time
     
     print("\n" + "=" * 60)
@@ -224,12 +306,14 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VA
     log_data = {
         'dataset_id': dataset_id,
         'split_id': split_id,
+        'input_csv': os.path.basename(input_csv),
         'train_samples': len(X_train),
         'val_samples': len(X_val),
         'test_samples': len(X_test),
         'test_size': test_size,
         'val_size': val_size,
         'random_state': random_state,
+        'num_classes': len(np.unique(labels)),
         'output_dir': os.path.abspath(output_dir),
         'duration_seconds': duration_seconds
     }
@@ -246,7 +330,10 @@ if __name__ == "__main__":
     parser.add_argument("--test_size", type=float, default=TEST_SIZE, help="测试集比例（默认0.2）")
     parser.add_argument("--val_size", type=float, default=VAL_SIZE, help="验证集比例（默认0.1）")
     parser.add_argument("--random_state", type=int, default=42, help="随机种子（默认42）")
+    parser.add_argument("--input_csv", type=str, default=None,
+                        help="输入CSV文件路径（默认processed_dataset/processed_dataset.csv）")
     args = parser.parse_args()
 
-    success = split_modality(args.dataset_id, args.split_id, args.test_size, args.val_size, args.random_state)
+    success = split_modality(args.dataset_id, args.split_id, args.test_size, args.val_size,
+                             args.random_state, args.input_csv)
     sys.exit(0 if success else 1)

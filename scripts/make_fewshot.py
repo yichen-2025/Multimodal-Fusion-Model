@@ -194,7 +194,13 @@ def make_fewshot_split(dataset_id=1,
 
     print(f"  新测试集: {len(new_test_labels)}样本")
     for lbl, cnt in zip(*np.unique(new_test_labels, return_counts=True)):
-        name = {0: "BENIGN", 1: "known_DDoS", 2: "unknown_DDoS"}.get(lbl, str(lbl))
+        name = {
+            0: "BENIGN", 1: "DoS Hulk", 2: "DoS GoldenEye", 3: "DoS slowloris",
+            4: "DoS Slowhttptest", 5: "DDoS", 6: "PortScan", 7: "FTP-Patator",
+            8: "SSH-Patator", 9: "Bot", 10: "Web Attack - Brute Force",
+            11: "Web Attack - XSS", 12: "Web Attack - Sql Injection",
+            13: "Infiltration", 14: "Heartbleed"
+        }.get(lbl, f"unknown({lbl})")
         print(f"    {name}({lbl}): {cnt}样本")
 
     # ========== 4. 构造CSV ==========

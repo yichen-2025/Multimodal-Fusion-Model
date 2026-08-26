@@ -27,20 +27,21 @@ class NumericEncoder(nn.Module):
             output_dim (int): 输出特征维度，默认为128
         """
         super().__init__()
-        # 构建两层全连接网络，包含非线性激活和批量归一化
+        # 构建两层全连接网络，包含非线性激活和层归一化
+        # 使用 LayerNorm 代替 BatchNorm1d，避免 batch_size=1 时的报错
         self.encoder = nn.Sequential(
             # 第一层：输入维度映射到隐藏层维度
             nn.Linear(input_dim, hidden_dim),
             # ReLU激活函数，引入非线性
             nn.ReLU(),
-            # 批量归一化，加速训练收敛，防止过拟合
-            nn.BatchNorm1d(hidden_dim),
+            # 层归一化，加速训练收敛，对 batch_size 不敏感
+            nn.LayerNorm(hidden_dim),
             # 第二层：隐藏层维度映射到输出维度
             nn.Linear(hidden_dim, output_dim),
             # ReLU激活函数
             nn.ReLU(),
-            # 批量归一化
-            nn.BatchNorm1d(output_dim)
+            # 层归一化
+            nn.LayerNorm(output_dim)
         )
 
     def forward(self, stat_features):

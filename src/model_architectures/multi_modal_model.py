@@ -29,7 +29,8 @@ class MultiModalFusionModel(nn.Module):
                  use_bert=True,
                  use_llm=True,
                  fusion_type="concat",
-                 bert_trainable=False):
+                 bert_trainable=False,
+                 num_classes=2):
         """
         初始化多模态融合模型
         
@@ -44,6 +45,7 @@ class MultiModalFusionModel(nn.Module):
             use_llm (bool): 是否使用LLM
             fusion_type (str): 融合策略 concat/add/attention
             bert_trainable (bool): BERT是否可训练
+            num_classes (int): 分类类别数
         """
         super().__init__()
 
@@ -52,6 +54,7 @@ class MultiModalFusionModel(nn.Module):
         self.use_llm = use_llm
         self.fusion_type = fusion_type
         self.bert_trainable = bert_trainable
+        self.num_classes = num_classes
 
         self._keys_to_ignore_on_save = set()
 
@@ -120,7 +123,7 @@ class MultiModalFusionModel(nn.Module):
         self.fusion_projection.to(self.device)
 
         # 初始化分类器
-        self.classifier = nn.Linear(self.hidden_size, 2).to(self.device)
+        self.classifier = nn.Linear(self.hidden_size, num_classes).to(self.device)
 
         # 统一数据类型
         if use_llm:
@@ -252,7 +255,7 @@ class MultiModalFusionModel(nn.Module):
         # 无LLM时不需要tokenizer和text_prompt
         if self.use_llm and tokenizer is not None:
             if text_prompt is None:
-                text_prompt = '根据流量特征判断这个流量是正常流量还是恶意流量。只能输出"正常流量"或"恶意流量"。'
+                text_prompt = '根据流量特征判断网络流量类型。'
             inputs = tokenizer(text_prompt, return_tensors="pt").to(self.device)
             result = self(stat_tensor, bert_tensor, inputs.input_ids, inputs.attention_mask)
         else:
@@ -345,6 +348,7 @@ class MultiModalFusionModel(nn.Module):
             'use_llm': self.use_llm,
             'fusion_type': self.fusion_type,
             'bert_trainable': self.bert_trainable,
+            'num_classes': self.num_classes,
         }
         
         if self.use_llm and self.llm is not None:
@@ -416,7 +420,8 @@ class MultiModalFusionModel(nn.Module):
             use_bert=config.get('use_bert', True),
             use_llm=config.get('use_llm', True),
             fusion_type=config.get('fusion_type', 'concat'),
-            bert_trainable=config.get('bert_trainable', False)
+            bert_trainable=config.get('bert_trainable', False),
+            num_classes=config.get('num_classes', 2)
         )
         
         model.numeric_encoder.load_state_dict(state_dict['numeric_encoder'])

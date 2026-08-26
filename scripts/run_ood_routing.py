@@ -23,7 +23,24 @@ from src.data.data_loader import load_split_data, collate_fn
 from utils.log_utils import save_log
 
 
-LABEL_NAMES = {0: "BENIGN", 1: "known_DDoS", 2: "unknown_DDoS"}
+LABEL_NAMES = {
+    0: "BENIGN",
+    1: "DoS Hulk",
+    2: "DoS GoldenEye",
+    3: "DoS slowloris",
+    4: "DoS Slowhttptest",
+    5: "DDoS",
+    6: "PortScan",
+    7: "FTP-Patator",
+    8: "SSH-Patator",
+    9: "Bot",
+    10: "Web Attack - Brute Force",
+    11: "Web Attack - XSS",
+    12: "Web Attack - Sql Injection",
+    13: "Infiltration",
+    14: "Heartbleed",
+    15: "unknown",
+}
 
 
 def load_ood_head(ood_id):
@@ -319,13 +336,15 @@ def run_ood_routing(
     all_labels_collected = []
     routing_log = []
 
-    # LLM提示模板
+    # LLM提示模板（多分类版本）
     llm_prompt_template = (
-        "根据以下网络流量统计特征判断该流量是正常流量还是DDoS攻击流量。\n"
+        "根据以下网络流量统计特征判断该流量类型。\n"
         "统计特征: 持续时间={duration}, 包头长度={header_len}, 包长度={pkt_len}, "
         "速率={rate}, 方向={direction}, 标志位={flags}\n"
         "文本描述: {text}\n"
-        "请直接回答: 正常流量 或 DDoS攻击。"
+        "请判断流量类型: BENIGN(正常)、DoS Hulk、DoS GoldenEye、DoS slowloris、"
+        "DoS Slowhttptest、DDoS、PortScan、FTP-Patator、SSH-Patator、Bot、"
+        "Web Attack(Brute Force/XSS/Sql Injection)、Infiltration、Heartbleed。"
     )
 
     for batch_idx, batch in enumerate(dataloader):
@@ -370,8 +389,8 @@ def run_ood_routing(
                     sample_idx = idx.item()
                     text = test_dataset[sample_idx].get('text', '') or "网络流量特征异常"
 
-                    # 构造prompt
-                    prompt = f"判断以下网络流量是正常流量还是DDoS攻击流量。\n流量描述：{text}\n请直接输出：正常流量 或 DDoS攻击"
+                    # 构造prompt（多分类版本）
+                    prompt = f"判断以下网络流量类型。\n流量描述：{text}\n请选择：BENIGN、DoS Hulk、DoS GoldenEye、DoS slowloris、DoS Slowhttptest、DDoS、PortScan、FTP-Patator、SSH-Patator、Bot、Web Attack(Brute Force/XSS/Sql Injection)、Infiltration、Heartbleed。直接输出类别名。"
 
                     # LLM推理
                     llm_result = llm_model.predict(
@@ -380,7 +399,7 @@ def run_ood_routing(
                         tokenizer=llm_tokenizer,
                         text_prompt=prompt
                     )
-                    # llm_result: 0=BENIGN, 1=DDoS
+                    # llm_result: 0..K-1=已知类, K=unknown
                     routed_pred[idx] = llm_result
 
                     routing_log.append({
@@ -392,9 +411,9 @@ def run_ood_routing(
                         'true_label': int(labels[idx].item())
                     })
             else:
-                # 无LLM：直接标记为未知类(2)
+                # 无LLM：直接标记为未知类
                 for idx in unknown_indices:
-                    routed_pred[idx] = num_known_classes  # unknown = 2
+                    routed_pred[idx] = num_known_classes
 
         all_a3_preds.extend(a3_pred.cpu().numpy().tolist())
         all_routed_preds.extend(routed_pred.cpu().numpy().tolist())
