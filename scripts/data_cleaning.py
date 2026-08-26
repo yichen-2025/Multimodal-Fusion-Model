@@ -3,6 +3,9 @@ import numpy as np
 import os
 import json
 import gc
+from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.pipeline import Pipeline as ImbPipeline
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -32,6 +35,8 @@ LABEL_NAMES = {v: k for k, v in LABEL_MAPPING.items()}
 
 BENIGN_RATIO = 2.0
 RANDOM_STATE = 42
+MIN_SAMPLES_PER_CLASS = 500
+USE_SMOTE = True
 
 
 def read_csv_safe(filepath):
@@ -82,6 +87,111 @@ def normalize_label(label):
             return LABEL_MAPPING["Web Attack \x96 Sql Injection"]
 
     return None
+
+
+def balance_with_smote(df, target_min_samples=500, random_state=42):
+    """
+    使用SMOTE过采样少数类 + 欠采样多数类来平衡数据集
+    
+    Args:
+        df: 输入DataFrame（包含Label列和特征列）
+        target_min_samples: 每个类别最少目标样本数
+        random_state: 随机种子
+    
+    Returns:
+        平衡后的DataFrame
+    """
+    print("\n  使用SMOTE过采样 + 欠采样进行类别均衡...")
+    
+    feature_cols = [col for col in df.columns if col != 'Label']
+    X = df[feature_cols].copy()
+    y = df['Label'].copy()
+    
+    label_counts = y.value_counts()
+    print(f"  原始分布: {len(label_counts)} 个类别")
+    
+    min_class_count = label_counts.min()
+    max_class_count = label_counts.max()
+    print(f"  最少样本类: {min_class_count} 个样本")
+    print(f"  最多样本类: {max_class_count} 个样本")
+    
+    if min_class_count >= target_min_samples:
+        print(f"  所有类别样本数 >= {target_min_samples}，无需过采样")
+        return df
+    
+    target_counts = {}
+    for label in label_counts.index:
+        count = label_counts[label]
+        if count < target_min_samples:
+            target_counts[label] = min(target_min_samples, count * 3)
+        elif count > target_min_samples * 5:
+            target_counts[label] = target_min_samples * 3
+        else:
+            target_counts[label] = count
+    
+    print(f"  目标分布: 最少 {min(target_counts.values())} 个样本, 最多 {max(target_counts.values())} 个样本")
+    
+    try:
+        smote = SMOTE(
+            sampling_strategy=target_counts,
+            random_state=random_state,
+            k_neighbors=min(min_class_count - 1, 5) if min_class_count > 1 else 1,
+            n_jobs=-1
+        )
+        
+        print("  执行SMOTE过采样...")
+        X_resampled, y_resampled = smote.fit_resample(X, y)
+        
+        under_sampler = RandomUnderSampler(
+            sampling_strategy={
+                label: min(count, target_min_samples * 3)
+                for label, count in y_resampled.value_counts().items()
+            },
+            random_state=random_state
+        )
+        
+        print("  执行欠采样...")
+        X_final, y_final = under_sampler.fit_resample(X_resampled, y_resampled)
+        
+        result_df = pd.DataFrame(X_final, columns=feature_cols)
+        result_df['Label'] = y_final.values
+        
+        print(f"  均衡完成: {len(result_df)} 个样本")
+        final_counts = result_df['Label'].value_counts().sort_index()
+        for label_idx, count in final_counts.items():
+            name = LABEL_NAMES.get(label_idx, str(label_idx))
+            print(f"    {label_idx}: {name} = {count}")
+        
+        return result_df
+        
+    except Exception as e:
+        print(f"  SMOTE采样失败: {e}")
+        print("  回退到简单的随机采样方案...")
+        
+        sampled_dfs = []
+        for label in y.unique():
+            class_df = df[df['Label'] == label]
+            current_count = len(class_df)
+            
+            if current_count < target_min_samples:
+                sampled = class_df.sample(
+                    n=target_min_samples,
+                    replace=True,
+                    random_state=random_state
+                )
+            elif current_count > target_min_samples * 5:
+                sampled = class_df.sample(
+                    n=target_min_samples * 3,
+                    random_state=random_state
+                )
+            else:
+                sampled = class_df
+            
+            sampled_dfs.append(sampled)
+        
+        result_df = pd.concat(sampled_dfs, ignore_index=True)
+        print(f"  简单采样完成: {len(result_df)} 个样本")
+        return result_df
 
 
 def main():
@@ -169,6 +279,14 @@ def main():
         gc.collect()
     else:
         print(f"  保留全部BENIGN样本")
+
+    if USE_SMOTE:
+        print("\n  使用SMOTE进行类别平衡...")
+        combined_df = balance_with_smote(
+            combined_df,
+            target_min_samples=MIN_SAMPLES_PER_CLASS,
+            random_state=RANDOM_STATE
+        )
 
     print(f"\n  均衡后标签分布:")
     label_counts_final = combined_df['Label'].value_counts().sort_index()

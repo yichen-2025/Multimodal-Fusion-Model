@@ -30,7 +30,8 @@ class MultiModalFusionModel(nn.Module):
                  use_llm=True,
                  fusion_type="concat",
                  bert_trainable=False,
-                 num_classes=2):
+                 num_classes=2,
+                 class_weights=None):
         """
         初始化多模态融合模型
         
@@ -46,6 +47,7 @@ class MultiModalFusionModel(nn.Module):
             fusion_type (str): 融合策略 concat/add/attention
             bert_trainable (bool): BERT是否可训练
             num_classes (int): 分类类别数
+            class_weights (torch.Tensor, optional): 类别权重张量，用于处理类别不平衡
         """
         super().__init__()
 
@@ -55,6 +57,7 @@ class MultiModalFusionModel(nn.Module):
         self.fusion_type = fusion_type
         self.bert_trainable = bert_trainable
         self.num_classes = num_classes
+        self.class_weights = class_weights
 
         self._keys_to_ignore_on_save = set()
 
@@ -218,7 +221,10 @@ class MultiModalFusionModel(nn.Module):
         loss = None
         if labels is not None:
             labels = labels.to(self.device)
-            loss_fn = nn.CrossEntropyLoss()
+            if self.class_weights is not None:
+                loss_fn = nn.CrossEntropyLoss(weight=self.class_weights.to(self.device))
+            else:
+                loss_fn = nn.CrossEntropyLoss()
             loss = loss_fn(logits, labels)
 
         return_dict = {"logits": logits, "loss": loss}
@@ -349,7 +355,11 @@ class MultiModalFusionModel(nn.Module):
             'fusion_type': self.fusion_type,
             'bert_trainable': self.bert_trainable,
             'num_classes': self.num_classes,
+            'has_class_weights': self.class_weights is not None,
         }
+        
+        if self.class_weights is not None:
+            config['class_weights'] = self.class_weights.tolist()
         
         if self.use_llm and self.llm is not None:
             config['llm_model_path'] = self.llm.config.name_or_path
@@ -410,6 +420,10 @@ class MultiModalFusionModel(nn.Module):
             config = state_dict['config']
         
         # 根据config中的配置实例化模型
+        class_weights = None
+        if config.get('has_class_weights', False) and 'class_weights' in config:
+            class_weights = torch.tensor(config['class_weights'], dtype=torch.float32)
+        
         model = cls(
             llm_model_path=llm_model_path,
             bert_model_path=config.get('bert_model_path', './models/bert'),
@@ -421,7 +435,8 @@ class MultiModalFusionModel(nn.Module):
             use_llm=config.get('use_llm', True),
             fusion_type=config.get('fusion_type', 'concat'),
             bert_trainable=config.get('bert_trainable', False),
-            num_classes=config.get('num_classes', 2)
+            num_classes=config.get('num_classes', 2),
+            class_weights=class_weights
         )
         
         model.numeric_encoder.load_state_dict(state_dict['numeric_encoder'])

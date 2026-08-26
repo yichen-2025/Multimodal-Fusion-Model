@@ -3,8 +3,10 @@ import sys
 import argparse
 import os
 import time
+import math
 import pandas as pd
 import numpy as np
+from torch.utils.data import WeightedRandomSampler
 from transformers import Trainer, TrainingArguments, AutoTokenizer, TrainerCallback, EarlyStoppingCallback
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from src.model_architectures.multi_modal_model import MultiModalFusionModel
@@ -31,6 +33,22 @@ VARIANT_DESCRIPTIONS = {
     "A2": "仅文本+LLM（无数值）",
     "A3": "无LLM（纯MLP分类）",
 }
+
+
+class TrainerWithSampler(Trainer):
+    """
+    支持自定义 train_sampler 的 Trainer（兼容 transformers>=5.x 移除 train_sampler 参数的变更）。
+    通过重写 _get_train_sampler 方法注入加权采样器。
+    """
+
+    def __init__(self, *args, train_sampler=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._custom_train_sampler = train_sampler
+
+    def _get_train_sampler(self, train_dataset=None):
+        if self._custom_train_sampler is not None:
+            return self._custom_train_sampler
+        return super()._get_train_sampler(train_dataset)
 
 
 class LossLoggerCallback(TrainerCallback):
@@ -84,16 +102,82 @@ def get_next_model_id(base_dir=None):
     return max_id + 1
 
 
+def compute_class_weights(dataset, num_classes):
+    """
+    计算类别权重（反比于类别频率）
+    
+    Args:
+        dataset: 训练数据集
+        num_classes: 类别数量
+    
+    Returns:
+        torch.Tensor: 类别权重张量
+    """
+    labels = [s['label'] for s in dataset]
+    class_counts = np.bincount(labels, minlength=num_classes)
+    total_samples = len(labels)
+    
+    class_weights = []
+    for i in range(num_classes):
+        if class_counts[i] > 0:
+            weight = total_samples / (num_classes * class_counts[i])
+        else:
+            weight = 1.0
+        class_weights.append(weight)
+    
+    class_weights = torch.tensor(class_weights, dtype=torch.float32)
+    
+    print(f"\n类别权重统计:")
+    for i in range(num_classes):
+        print(f"  类别 {i}: 样本数={class_counts[i]}, 权重={class_weights[i]:.4f}")
+    
+    return class_weights
+
+
+def create_weighted_sampler(dataset, num_classes):
+    """
+    创建加权随机采样器
+    
+    Args:
+        dataset: 训练数据集
+        num_classes: 类别数量
+    
+    Returns:
+        WeightedRandomSampler: 加权采样器
+    """
+    labels = [s['label'] for s in dataset]
+    class_counts = np.bincount(labels, minlength=num_classes)
+    total_samples = len(labels)
+    
+    class_weights = []
+    for i in range(num_classes):
+        if class_counts[i] > 0:
+            weight = total_samples / (num_classes * class_counts[i])
+        else:
+            weight = 1.0
+        class_weights.append(weight)
+    
+    sample_weights = [class_weights[label] for label in labels]
+    sampler = WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(sample_weights),
+        replacement=True
+    )
+    
+    print(f"\n已创建WeightedRandomSampler，样本数={len(sample_weights)}")
+    return sampler
+
+
 def train_model(model_path=None, 
                 output_dir=None, 
                 save_path=None,
                 model_id=None,
                 dataset_id=0,
                 split_id=0,
-                per_device_train_batch_size=2,
-                gradient_accumulation_steps=4,
-                learning_rate=1e-4,
-                num_train_epochs=3,
+                per_device_train_batch_size=4,
+                gradient_accumulation_steps=2,
+                learning_rate=5e-4,
+                num_train_epochs=5,
                 variant=None,
                 use_numeric=None,
                 use_bert=None,
@@ -101,7 +185,12 @@ def train_model(model_path=None,
                 fusion_type="concat",
                 bert_trainable=False,
                 seed=42,
-                num_classes=None):
+                num_classes=None,
+                use_class_weights=True,
+                use_weighted_sampler=True,
+                warmup_ratio=0.1,
+                weight_decay=0.01,
+                max_grad_norm=1.0):
     """
     训练多模态融合模型
     
@@ -124,6 +213,11 @@ def train_model(model_path=None,
         bert_trainable (bool): BERT是否可训练
         seed (int): 随机种子
         num_classes (int): 分类类别数（None则自动从数据推断）
+        use_class_weights (bool): 是否使用类别加权损失
+        use_weighted_sampler (bool): 是否使用加权采样器
+        warmup_ratio (float): 预热比例
+        weight_decay (float): 权重衰减
+        max_grad_norm (float): 梯度裁剪范数
         
     Returns:
         MultiModalFusionModel: 训练完成的模型
@@ -204,6 +298,16 @@ def train_model(model_path=None,
     val_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="val",
                                   dataset_id=dataset_id, split_id=split_id)
 
+    # 计算类别权重（用于加权损失函数）
+    class_weights = None
+    if use_class_weights:
+        class_weights = compute_class_weights(train_dataset, num_classes)
+    
+    # 创建加权采样器
+    sampler = None
+    if use_weighted_sampler:
+        sampler = create_weighted_sampler(train_dataset, num_classes)
+
     # 初始化模型（需在 num_classes 确定后）
     model = MultiModalFusionModel(
         llm_model_path=model_path,
@@ -212,7 +316,8 @@ def train_model(model_path=None,
         use_llm=use_llm,
         fusion_type=fusion_type,
         bert_trainable=bert_trainable,
-        num_classes=num_classes
+        num_classes=num_classes,
+        class_weights=class_weights
     )
     
     # 无LLM时不需要tokenizer
@@ -238,6 +343,10 @@ def train_model(model_path=None,
         }
 
     # 无LLM变体使用float32，不需要bf16
+    steps_per_epoch = math.ceil(len(train_dataset) / (per_device_train_batch_size * gradient_accumulation_steps))
+    total_training_steps = steps_per_epoch * num_train_epochs
+    warmup_steps = int(warmup_ratio * total_training_steps)
+
     training_args = TrainingArguments(
         output_dir=output_dir,
         per_device_train_batch_size=per_device_train_batch_size,
@@ -256,6 +365,10 @@ def train_model(model_path=None,
         save_total_limit=3,
         seed=seed,
         data_seed=seed,
+        lr_scheduler_type="cosine",
+        warmup_steps=warmup_steps,
+        weight_decay=weight_decay,
+        max_grad_norm=max_grad_norm,
     )
 
     # 创建Loss日志目录
@@ -268,15 +381,22 @@ def train_model(model_path=None,
     else:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=2))
     
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=val_dataset,
-        data_collator=custom_collate,
-        compute_metrics=compute_metrics,
-        callbacks=callbacks
-    )
+    trainer_kwargs = {
+        'model': model,
+        'args': training_args,
+        'train_dataset': train_dataset,
+        'eval_dataset': val_dataset,
+        'data_collator': custom_collate,
+        'compute_metrics': compute_metrics,
+        'callbacks': callbacks,
+    }
+    
+    # 如果使用加权采样器，添加到Trainer
+    if sampler is not None:
+        trainer_kwargs['train_sampler'] = sampler
+        print("使用WeightedRandomSampler进行类别平衡采样")
+    
+    trainer = TrainerWithSampler(**trainer_kwargs)
 
     print("Starting training...")
     trainer.train()
@@ -307,6 +427,11 @@ def train_model(model_path=None,
         f.write(f"learning_rate: {learning_rate}\n")
         f.write(f"num_train_epochs: {num_train_epochs}\n")
         f.write(f"seed: {seed}\n")
+        f.write(f"use_class_weights: {use_class_weights}\n")
+        f.write(f"use_weighted_sampler: {use_weighted_sampler}\n")
+        f.write(f"warmup_ratio: {warmup_ratio}\n")
+        f.write(f"weight_decay: {weight_decay}\n")
+        f.write(f"max_grad_norm: {max_grad_norm}\n")
         f.write(f"duration_seconds: {duration_seconds}\n")
     
     print(f"模型配置已保存到 {os.path.join(save_path, 'config.txt')}")
@@ -335,7 +460,12 @@ def train_model(model_path=None,
         'loss_log_path': os.path.abspath(loss_log_dir),
         'duration_seconds': duration_seconds,
         'trainable_params': trainable_params,
-        'seed': seed
+        'seed': seed,
+        'use_class_weights': use_class_weights,
+        'use_weighted_sampler': use_weighted_sampler,
+        'warmup_ratio': warmup_ratio,
+        'weight_decay': weight_decay,
+        'max_grad_norm': max_grad_norm
     }
     log_id = save_log('training', log_data)
     print(f"\n模型训练日志已保存: logs/training/log_{log_id}.json")
@@ -349,10 +479,10 @@ if __name__ == "__main__":
     parser.add_argument("--model_id", type=int, default=None, help="模型ID（默认自动递增）")
     parser.add_argument("--dataset_id", type=int, default=0, help="数据集ID")
     parser.add_argument("--split_id", type=int, default=0, help="划分ID")
-    parser.add_argument("--batch_size", type=int, default=2, help="每个设备的batch大小")
-    parser.add_argument("--gradient_accumulation", type=int, default=4, help="梯度累积步数")
-    parser.add_argument("--lr", type=float, default=1e-4, help="学习率")
-    parser.add_argument("--epochs", type=int, default=3, help="训练轮数")
+    parser.add_argument("--batch_size", type=int, default=4, help="每个设备的batch大小")
+    parser.add_argument("--gradient_accumulation", type=int, default=2, help="梯度累积步数")
+    parser.add_argument("--lr", type=float, default=5e-4, help="学习率")
+    parser.add_argument("--epochs", type=int, default=5, help="训练轮数")
     parser.add_argument("--variant", type=str, default=None, help="消融变体 A0/A1/A2/A3")
     parser.add_argument("--use_numeric", action='store_true', default=None, help="使用数值模态")
     parser.add_argument("--use_bert", action='store_true', default=None, help="使用文本模态")
@@ -361,6 +491,11 @@ if __name__ == "__main__":
     parser.add_argument("--bert_trainable", action='store_true', default=False, help="BERT可训练")
     parser.add_argument("--seed", type=int, default=42, help="随机种子")
     parser.add_argument("--num_classes", type=int, default=None, help="分类类别数（默认自动检测）")
+    parser.add_argument("--disable_class_weights", action='store_true', help="禁用类别加权损失")
+    parser.add_argument("--disable_weighted_sampler", action='store_true', help="禁用加权采样器")
+    parser.add_argument("--warmup_ratio", type=float, default=0.1, help="预热比例")
+    parser.add_argument("--weight_decay", type=float, default=0.01, help="权重衰减")
+    parser.add_argument("--max_grad_norm", type=float, default=1.0, help="梯度裁剪范数")
     args = parser.parse_args()
 
     train_model(
@@ -379,5 +514,10 @@ if __name__ == "__main__":
         fusion_type=args.fusion_type,
         bert_trainable=args.bert_trainable,
         seed=args.seed,
-        num_classes=args.num_classes
+        num_classes=args.num_classes,
+        use_class_weights=not args.disable_class_weights,
+        use_weighted_sampler=not args.disable_weighted_sampler,
+        warmup_ratio=args.warmup_ratio,
+        weight_decay=args.weight_decay,
+        max_grad_norm=args.max_grad_norm
     )
