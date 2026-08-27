@@ -548,6 +548,12 @@ def train_model(model_path=None,
     
     val_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="val",
                                   dataset_id=dataset_id, split_id=split_id)
+    if val_dataset is None:
+        print("未找到验证集(val)数据，尝试使用测试集(test)作为验证集...")
+        val_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="test",
+                                      dataset_id=dataset_id, split_id=split_id)
+    if val_dataset is None:
+        print("警告：未找到任何验证集数据，将跳过训练过程中的评估。")
 
     # 计算类别权重（用于加权损失函数）
     class_weights = None
@@ -632,10 +638,10 @@ def train_model(model_path=None,
         logging_steps=10,
         report_to="none",
         remove_unused_columns=False,
-        eval_strategy="epoch",
+        eval_strategy="epoch" if val_dataset is not None else "no",
         save_strategy="epoch",
-        load_best_model_at_end=True,
-        metric_for_best_model="eval_macro_f1",
+        load_best_model_at_end=val_dataset is not None,
+        metric_for_best_model="eval_macro_f1" if val_dataset is not None else None,
         greater_is_better=True,
         save_total_limit=3,
         seed=seed,
@@ -662,11 +668,12 @@ def train_model(model_path=None,
     
     callbacks = [LossLoggerCallback(loss_log_dir)]
     callbacks.append(PerClassMetricsCallback(loss_log_dir, num_classes, label_names))
-    # 无LLM变体收敛快，减小早停patience
-    if use_llm:
-        callbacks.append(EarlyStoppingCallback(early_stopping_patience=3))
-    else:
-        callbacks.append(EarlyStoppingCallback(early_stopping_patience=2))
+    # 仅当存在验证集时启用早停
+    if val_dataset is not None:
+        if use_llm:
+            callbacks.append(EarlyStoppingCallback(early_stopping_patience=3))
+        else:
+            callbacks.append(EarlyStoppingCallback(early_stopping_patience=2))
     
     trainer_kwargs = {
         'model': model,
