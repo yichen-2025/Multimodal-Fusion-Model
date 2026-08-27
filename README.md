@@ -188,6 +188,13 @@ set HF_ENDPOINT=https://hf-mirror.com
 
 ### 3. 准备数据集
 
+> **数据集下载说明**：由于CIC-IDS-2017数据集体积较大（约50GB），无法直接包含在GitHub仓库中，请自行下载。
+>
+> 1. 访问 [CIC-IDS-2017 官方网站](https://www.unb.ca/cic/datasets/ids-2017.html)
+> 2. 点击页面底部的 **"download this dataset"**
+> 3. 完成验证后，按路径导航：`CIC-IDS-2017` → `CSVs` → `GeneratedLabelledFlows.zip`
+> 4. 下载后解压，将CSV文件放入 `data_processing/` 目录
+
 将原始数据集（CSV格式）放入 `data_processing/` 目录，数据集需包含：
 - `Label` 列：值为 `BENIGN`（正常流量）或 `DDoS`（恶意流量）
 - 特征列：`Destination Port`, `Bwd Packet Length Mean`, `Avg Bwd Segment Size`, `Bwd Packet Length Max`, `Bwd Packet Length Std`, `URG Flag Count`, `Packet Length Mean`, `Average Packet Size`, `Packet Length Std`
