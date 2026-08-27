@@ -500,11 +500,12 @@ def train_model(model_path=None,
             print("=" * 60)
             print("警告: 未检测到GPU (CUDA)！")
             print("当前将使用CPU运行，模型训练速度会非常慢。")
-            print("请确认是否继续...")
+            print("您的机器有NVIDIA驱动(566.24)但PyTorch是CPU版本。")
+            print("")
+            print("如需安装GPU版PyTorch，请运行:")
+            print("  pip install torch==2.5.1+cu124 torchvision==0.20.1+cu124 --index-url https://download.pytorch.org/whl/cu124")
+            print("由于是非交互式运行，自动继续CPU模式...")
             print("=" * 60)
-            choice = input("输入 'y' 继续使用CPU，输入其他键退出: ")
-            if choice.strip().lower() != 'y':
-                raise RuntimeError("用户选择终止：未检测到GPU。请检查CUDA环境或安装GPU版PyTorch。")
     
     if model_path is None:
         model_path = os.path.join(PROJECT_ROOT, "models", "qwen2.5-1.5b")
@@ -634,7 +635,8 @@ def train_model(model_path=None,
         gradient_accumulation_steps=gradient_accumulation_steps,
         learning_rate=learning_rate,
         num_train_epochs=num_train_epochs,
-        bf16=use_llm,  # 无LLM时使用float32
+        bf16=use_llm and torch.cuda.is_available(),  # CPU上不使用bf16
+        fp16=False,  # 禁用fp16避免CPU警告
         logging_steps=10,
         report_to="none",
         remove_unused_columns=False,
@@ -657,14 +659,10 @@ def train_model(model_path=None,
     
     # 加载标签映射（用于混淆矩阵和每类指标）
     try:
-        from scripts.split_modality import LABEL_MAPPING
-        label_names = LABEL_MAPPING
+        from config.label_config import MERGED_LABEL_NAMES
+        label_names = MERGED_LABEL_NAMES
     except ImportError:
-        try:
-            from split_modality import LABEL_MAPPING
-            label_names = LABEL_MAPPING
-        except ImportError:
-            label_names = {i: str(i) for i in range(num_classes)}
+        label_names = {i: str(i) for i in range(num_classes)}
     
     callbacks = [LossLoggerCallback(loss_log_dir)]
     callbacks.append(PerClassMetricsCallback(loss_log_dir, num_classes, label_names))

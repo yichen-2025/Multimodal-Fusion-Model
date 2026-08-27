@@ -10,6 +10,7 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
 sys.path.insert(0, PROJECT_ROOT)
 from utils.log_utils import save_log
+from config.label_config import MERGED_LABEL_NAMES
 
 INPUT_CSV = os.path.join(PROJECT_ROOT, "processed_dataset", "processed_dataset.csv")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "processed_dataset")
@@ -25,24 +26,6 @@ SELECTED_FEATURES = [
     "Average Packet Size",
     "Packet Length Std"
 ]
-
-LABEL_NAMES = {
-    0: "BENIGN",
-    1: "DoS Hulk",
-    2: "DoS GoldenEye",
-    3: "DoS slowloris",
-    4: "DoS Slowhttptest",
-    5: "DDoS",
-    6: "PortScan",
-    7: "FTP-Patator",
-    8: "SSH-Patator",
-    9: "Bot",
-    10: "Web Attack - Brute Force",
-    11: "Web Attack - XSS",
-    12: "Web Attack - Sql Injection",
-    13: "Infiltration",
-    14: "Heartbleed",
-}
 
 
 def get_next_dataset_id():
@@ -163,7 +146,7 @@ def extract_subset(total_samples=None, ratio=None, mode="stratified",
         print("\n2. 原始标签分布...")
         label_counts = df['Label'].value_counts().sort_index()
         for lbl, cnt in label_counts.items():
-            name = LABEL_NAMES.get(int(lbl), str(lbl))
+            name = MERGED_LABEL_NAMES.get(int(lbl), str(lbl))
             pct = cnt / len(df) * 100
             print(f"  {int(lbl):2d}: {name:<30s} = {cnt:>8d} ({pct:5.1f}%)")
 
@@ -178,7 +161,7 @@ def extract_subset(total_samples=None, ratio=None, mode="stratified",
             actual_total = sum(class_counts.values())
             print(f"  实际采样总数: {actual_total}")
             for lbl, cnt in sorted(class_counts.items()):
-                name = LABEL_NAMES.get(int(lbl), str(lbl))
+                name = MERGED_LABEL_NAMES.get(int(lbl), str(lbl))
                 avail = label_counts.get(lbl, 0)
                 note = " [全部保留]" if cnt >= avail else ""
                 print(f"  {int(lbl):2d}: {name:<30s} 采样 {cnt:>6d} / 可用 {avail:>8d}{note}")

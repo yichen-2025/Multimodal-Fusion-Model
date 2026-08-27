@@ -15,6 +15,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from src.model_architectures.bert_encoder import BertEncoder
 from utils.log_utils import save_log
+from config.label_config import MERGED_LABEL_MAPPING, MERGED_LABEL_NAMES
 
 BASE_INPUT_DIR = os.path.join(PROJECT_ROOT, "processed_dataset")
 BASE_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "split_data")
@@ -34,23 +35,9 @@ SELECTED_FEATURES = [
     "Packet Length Std"
 ]
 
-LABEL_MAPPING = {
-    0: "BENIGN",
-    1: "DoS Hulk",
-    2: "DoS GoldenEye",
-    3: "DoS slowloris",
-    4: "DoS Slowhttptest",
-    5: "DDoS",
-    6: "PortScan",
-    7: "FTP-Patator",
-    8: "SSH-Patator",
-    9: "Bot",
-    10: "Web Attack - Brute Force",
-    11: "Web Attack - XSS",
-    12: "Web Attack - Sql Injection",
-    13: "Infiltration",
-    14: "Heartbleed",
-}
+# 导入合并后的标签映射（12类）
+# 如果需要使用原始15类，请手动修改这里
+LABEL_MAPPING = {v: k for k, v in MERGED_LABEL_NAMES.items()}
 
 
 def get_next_split_id(dataset_id):
@@ -101,11 +88,8 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VA
         print("=" * 60)
         print("警告: 未检测到GPU (CUDA)！")
         print("当前将使用CPU运行，BERT嵌入提取速度可能极慢。")
-        print("请确认是否继续...")
+        print("由于是非交互式运行，自动继续...")
         print("=" * 60)
-        choice = input("输入 'y' 继续使用CPU，输入其他键退出: ")
-        if choice.strip().lower() != 'y':
-            raise RuntimeError("用户选择终止：未检测到GPU。请检查CUDA环境或安装GPU版PyTorch。")
 
     if input_csv is None:
         # 优先使用 extract_subset 生成的子集文件 dataset_{id}.csv
@@ -155,7 +139,7 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VA
     bert_embeddings = None
     use_cpu_fallback = False
     
-    for try_batch_size in [16, 8, 4]:
+    for try_batch_size in [64, 32, 16, 8, 4]:
         try:
             bert_encoder = BertEncoder(local_model_path=BERT_MODEL_PATH, batch_size=try_batch_size)
             bert_encoder.eval()

@@ -137,21 +137,14 @@ class MultiModalFusionModel(nn.Module):
 
         self._keys_to_ignore_on_save = set()
 
-        # 设备选择：无LLM时不强制要求GPU
-        if use_llm:
-            if not torch.cuda.is_available():
-                print("=" * 60)
-                print("警告: 未检测到GPU (CUDA)！")
-                print("当前将使用CPU运行，这可能导致训练/推理速度极慢。")
-                print("请确认是否继续...")
-                print("=" * 60)
-                choice = input("输入 'y' 继续使用CPU，输入其他键退出: ")
-                if choice.strip().lower() != 'y':
-                    raise RuntimeError("用户选择终止：未检测到GPU。请检查CUDA环境或安装GPU版PyTorch。")
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        else:
-            # 无LLM时，自动选择设备
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # 设备选择
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if use_llm and not torch.cuda.is_available():
+            print("=" * 60)
+            print("警告: 未检测到GPU (CUDA)！")
+            print("当前将使用CPU运行，这可能导致训练/推理速度极慢。")
+            print("由于是非交互式运行，自动继续CPU模式...")
+            print("=" * 60)
 
         # 初始化数值特征编码器（始终初始化，方便统一state_dict）
         self.numeric_encoder = NumericEncoder(
@@ -177,10 +170,15 @@ class MultiModalFusionModel(nn.Module):
 
         # 加载LLM模型（条件加载）
         if use_llm:
+            # 根据设备选择合适的数据类型
+            if self.device.type == "cuda":
+                llm_dtype = torch.bfloat16
+            else:
+                llm_dtype = torch.float32
             self.llm = AutoModelForCausalLM.from_pretrained(
                 llm_model_path,
-                torch_dtype=torch.bfloat16,
-                device_map="auto",
+                torch_dtype=llm_dtype,
+                device_map="auto" if self.device.type == "cuda" else None,
                 local_files_only=True
             )
             self.hidden_size = self.llm.config.hidden_size
@@ -243,7 +241,7 @@ class MultiModalFusionModel(nn.Module):
             self.focal_loss_fn = None
 
         # 统一数据类型
-        if use_llm:
+        if use_llm and self.llm is not None:
             dtype = next(self.llm.parameters()).dtype
         else:
             dtype = torch.float32

@@ -3,35 +3,27 @@ import numpy as np
 import os
 import json
 import gc
+import argparse
 from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.pipeline import Pipeline as ImbPipeline
 
+# 导入统一标签配置
+import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, PROJECT_ROOT)
+from config.label_config import (
+    ORIGINAL_LABEL_MAPPING,
+    ORIGINAL_LABEL_NAMES,
+    MERGED_LABEL_MAPPING,
+    MERGED_LABEL_NAMES,
+    ORIGINAL_TO_MERGED,
+    MIN_SAMPLES_THRESHOLD
+)
 
 INPUT_DIR = os.path.join(PROJECT_ROOT, "data_processing")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "processed_dataset")
-
-LABEL_MAPPING = {
-    "BENIGN": 0,
-    "DoS Hulk": 1,
-    "DoS GoldenEye": 2,
-    "DoS slowloris": 3,
-    "DoS Slowhttptest": 4,
-    "DDoS": 5,
-    "PortScan": 6,
-    "FTP-Patator": 7,
-    "SSH-Patator": 8,
-    "Bot": 9,
-    "Web Attack \x96 Brute Force": 10,
-    "Web Attack \x96 XSS": 11,
-    "Web Attack \x96 Sql Injection": 12,
-    "Infiltration": 13,
-    "Heartbleed": 14,
-}
-
-LABEL_NAMES = {v: k for k, v in LABEL_MAPPING.items()}
 
 BENIGN_RATIO = 2.0
 RANDOM_STATE = 42
@@ -63,30 +55,15 @@ def clean_data(df):
     return df
 
 
-def normalize_label(label):
-    if pd.isna(label):
-        return None
-    label_str = str(label).strip()
-
-    if label_str in LABEL_MAPPING:
-        return LABEL_MAPPING[label_str]
-
-    normalized = label_str.replace('\x96', '-').replace('\x97', '-').replace('\x98', '-').replace('\x99', '-')
-    normalized = normalized.replace('\u2013', '-').replace('\u2014', '-').replace('\u2015', '-')
-
-    for key, val in LABEL_MAPPING.items():
-        if key.replace('\x96', '-').replace('\x97', '-').replace('\u2013', '-').replace('\u2014', '-') == normalized:
-            return val
-
-    if 'Web Attack' in label_str:
-        if 'Brute Force' in label_str:
-            return LABEL_MAPPING["Web Attack \x96 Brute Force"]
-        if 'XSS' in label_str:
-            return LABEL_MAPPING["Web Attack \x96 XSS"]
-        if 'Sql Injection' in label_str or 'SQL' in label_str:
-            return LABEL_MAPPING["Web Attack \x96 Sql Injection"]
-
-    return None
+def normalize_label(label, use_merged=True):
+    """
+    标准化原始标签字符串，返回编码
+    使用统一配置中的映射规则，支持合并或不合并模式
+    """
+    import sys
+    sys.path.insert(0, PROJECT_ROOT)
+    from config.label_config import normalize_label as config_normalize
+    return config_normalize(label, use_merged=use_merged)
 
 
 def balance_with_smote(df, target_min_samples=500, random_state=42):
@@ -159,7 +136,7 @@ def balance_with_smote(df, target_min_samples=500, random_state=42):
         print(f"  均衡完成: {len(result_df)} 个样本")
         final_counts = result_df['Label'].value_counts().sort_index()
         for label_idx, count in final_counts.items():
-            name = LABEL_NAMES.get(label_idx, str(label_idx))
+            name = MERGED_LABEL_NAMES.get(label_idx, str(label_idx))
             print(f"    {label_idx}: {name} = {count}")
         
         return result_df
@@ -194,10 +171,12 @@ def balance_with_smote(df, target_min_samples=500, random_state=42):
         return result_df
 
 
-def main():
+def main(use_merged=True):
     print("=" * 60)
     print("多分类数据清洗与合并脚本")
     print("=" * 60)
+    print(f"标签模式: {'合并12类' if use_merged else '原始15类'}")
+    print(f"合并阈值: MIN_SAMPLES_THRESHOLD = {MIN_SAMPLES_THRESHOLD}")
 
     csv_files = sorted([f for f in os.listdir(INPUT_DIR) if f.endswith('.csv')])
     if not csv_files:
@@ -238,11 +217,16 @@ def main():
 
     print("\n" + "-" * 40)
     print("Step 2: 标签编码...")
-    print(f"  标签映射表 ({len(LABEL_MAPPING)} 类):")
-    for name, idx in sorted(LABEL_MAPPING.items(), key=lambda x: x[1]):
+    if use_merged:
+        mapping = MERGED_LABEL_MAPPING
+        print(f"  标签映射表 ({len(mapping)} 类 - 已合并):")
+    else:
+        mapping = ORIGINAL_LABEL_MAPPING
+        print(f"  标签映射表 ({len(mapping)} 类 - 原始):")
+    for name, idx in sorted(mapping.items(), key=lambda x: x[1]):
         print(f"    {idx}: {name}")
 
-    combined_df['Label'] = combined_df['Label'].apply(normalize_label)
+    combined_df['Label'] = combined_df['Label'].apply(lambda x: normalize_label(x, use_merged=use_merged))
     valid_mask = combined_df['Label'].notna()
     dropped = (~valid_mask).sum()
     if dropped > 0:
@@ -251,9 +235,10 @@ def main():
 
     combined_df['Label'] = combined_df['Label'].astype(int)
     label_counts = combined_df['Label'].value_counts().sort_index()
-    print(f"\n  合并后标签分布:")
+    label_names_lookup = MERGED_LABEL_NAMES if use_merged else ORIGINAL_LABEL_NAMES
+    print(f"\n  标签分布 ({len(label_counts)} 类):")
     for label_idx, count in label_counts.items():
-        name = LABEL_NAMES.get(label_idx, str(label_idx))
+        name = label_names_lookup.get(label_idx, str(label_idx))
         pct = count / len(combined_df) * 100
         print(f"    {label_idx}: {name:40s} = {count:>8d} ({pct:5.2f}%)")
 
@@ -291,7 +276,7 @@ def main():
     print(f"\n  均衡后标签分布:")
     label_counts_final = combined_df['Label'].value_counts().sort_index()
     for label_idx, count in label_counts_final.items():
-        name = LABEL_NAMES.get(label_idx, str(label_idx))
+        name = label_names_lookup.get(label_idx, str(label_idx))
         pct = count / len(combined_df) * 100
         print(f"    {label_idx}: {name:40s} = {count:>8d} ({pct:5.2f}%)")
 
@@ -306,11 +291,14 @@ def main():
     print(f"  数据文件: {output_csv}")
     print(f"  行数: {combined_df.shape[0]:,}, 列数: {combined_df.shape[1]}")
 
+    save_mapping = MERGED_LABEL_MAPPING if use_merged else ORIGINAL_LABEL_MAPPING
+    save_names = MERGED_LABEL_NAMES if use_merged else ORIGINAL_LABEL_NAMES
     mapping_path = os.path.join(OUTPUT_DIR, "label_mapping.json")
     mapping_data = {
-        "label_to_id": {name: idx for name, idx in LABEL_MAPPING.items()},
-        "id_to_label": {str(idx): name for idx, name in LABEL_NAMES.items()},
-        "num_classes": len(LABEL_MAPPING),
+        "label_to_id": {name: idx for name, idx in save_mapping.items()},
+        "id_to_label": {str(idx): name for idx, name in save_names.items()},
+        "num_classes": len(save_mapping),
+        "use_merged": use_merged,
         "benign_ratio": BENIGN_RATIO,
         "total_samples": len(combined_df),
         "class_distribution": {
@@ -327,4 +315,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="多分类数据清洗与合并脚本")
+    parser.add_argument("--use_merged", action='store_true', default=True,
+                        help="使用合并后的12类标签（默认开启）")
+    parser.add_argument("--no_merged", action='store_true', default=False,
+                        help="使用原始15类标签（不合并）")
+    args = parser.parse_args()
+    main(use_merged=not args.no_merged)
