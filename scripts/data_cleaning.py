@@ -19,7 +19,8 @@ from config.label_config import (
     MERGED_LABEL_MAPPING,
     MERGED_LABEL_NAMES,
     ORIGINAL_TO_MERGED,
-    MIN_SAMPLES_THRESHOLD
+    MIN_SAMPLES_THRESHOLD,
+    normalize_label as _normalize_label,  # 直接导入，避免每次 apply 都内部 import
 )
 
 INPUT_DIR = os.path.join(PROJECT_ROOT, "data_processing")
@@ -58,12 +59,9 @@ def clean_data(df):
 def normalize_label(label, use_merged=True):
     """
     标准化原始标签字符串，返回编码
-    使用统一配置中的映射规则，支持合并或不合并模式
+    直接调用已导入的 _normalize_label，避免每次 apply 都执行 import
     """
-    import sys
-    sys.path.insert(0, PROJECT_ROOT)
-    from config.label_config import normalize_label as config_normalize
-    return config_normalize(label, use_merged=use_merged)
+    return _normalize_label(label, use_merged=use_merged)
 
 
 def balance_with_smote(df, target_min_samples=500, random_state=42):
@@ -113,7 +111,7 @@ def balance_with_smote(df, target_min_samples=500, random_state=42):
             sampling_strategy=target_counts,
             random_state=random_state,
             k_neighbors=min(min_class_count - 1, 5) if min_class_count > 1 else 1,
-            n_jobs=-1
+            # n_jobs 参数在 imblearn >= 0.11 中已移除
         )
         
         print("  执行SMOTE过采样...")

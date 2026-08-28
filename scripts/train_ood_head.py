@@ -15,6 +15,7 @@ from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.model_architectures.ood_head import OODHead, OODLoss
 from src.data.data_loader import load_split_data, collate_fn
 from utils.log_utils import save_log
+from config.label_config import MERGED_LABEL_NAMES
 
 
 def get_next_ood_id(base_dir=None):
@@ -344,13 +345,8 @@ def train_ood_head(
         'distance_type': distance_type,
         'temperature': temperature,
         'ood_threshold': ood_head.ood_threshold,
-        'label_mapping': {str(i): name for i, name in enumerate([
-            "BENIGN", "DoS Hulk", "DoS GoldenEye", "DoS slowloris",
-            "DoS Slowhttptest", "DDoS", "PortScan", "FTP-Patator",
-            "SSH-Patator", "Bot", "Web Attack - Brute Force",
-            "Web Attack - XSS", "Web Attack - Sql Injection",
-            "Infiltration", "Heartbleed"
-        ][:num_known_classes])},
+        'label_mapping': {str(i): MERGED_LABEL_NAMES.get(i, f"class_{i}")
+                          for i in range(num_known_classes)},
         'unknown_label': num_known_classes,
         'creation_time': time.strftime('%Y-%m-%d %H:%M:%S'),
     }
