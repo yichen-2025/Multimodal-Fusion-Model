@@ -182,7 +182,7 @@ def extract_subset(total_samples=None, ratio=None, mode="stratified",
         print(f"\n5. 采样后标签分布...")
         subset_counts = df_subset['Label'].value_counts().sort_index()
         for lbl, cnt in subset_counts.items():
-            name = LABEL_NAMES.get(int(lbl), str(lbl))
+            name = MERGED_LABEL_NAMES.get(int(lbl), str(lbl))
             pct = cnt / len(df_subset) * 100
             print(f"  {int(lbl):2d}: {name:<30s} = {cnt:>6d} ({pct:5.1f}%)")
         print(f"  总计: {len(df_subset)}行")
