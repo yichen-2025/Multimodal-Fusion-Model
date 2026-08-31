@@ -34,7 +34,7 @@
 Multimodal-Fusion-Model/
 ├── main.py                        # 主入口文件
 ├── README.md                      # 项目说明文档
-├── IMPLEMENTATION_GUIDE.md        # 实施指南（从零开始）
+├── implementation_guide.md          # 实施指南（从零执行，含正确命令）
 ├── 原理图.png                      # 项目原理图
 ├── 数据集处理流程图.png             # 数据处理流程图
 ├── .gitignore                     # Git忽略规则
@@ -47,9 +47,9 @@ Multimodal-Fusion-Model/
 │   ├── test_model.py              # 模型测试脚本
 │   ├── run_ablation.py            # 消融实验运行器
 │   ├── make_openset_split.py      # [P1.1] 构造开集数据集划分
-│   ├── train_ood_head.py          # [P1.2] 训练OOD检测头
-│   ├── run_ood_routing.py         # [P1.3] OOD路由评估
-│   ├── make_fewshot.py            # [P1.4] 构造少样本数据
+│   ├── train_ood_head.py          # [P1.3] 训练OOD检测头
+│   ├── run_ood_routing.py         # [P1.4] OOD路由评估
+│   ├── make_fewshot.py            # [P1.2] 构造少样本数据
 │   ├── report_generator.py       # [P1.5] 结果汇总报告生成器
 │   └── run_openworld_experiment.py # [P1.5] 开集少样本全流程实验
 │
@@ -74,7 +74,9 @@ Multimodal-Fusion-Model/
 │   └── test_project.py            # 项目测试
 │
 ├── docs/                          # 文档
-│   └── theory.md                  # 项目原理说明
+│   ├── theory.md                  # 项目原理说明（旧架构，仅供参考）
+│   ├── 代码结构与数据流.md          # 文件功能 + 数据流动图
+│   └── Phase1_流程说明.md          # Phase 1 流程说明
 │
 ├── data_processing/               # 原始数据集（需手动放入）
 ├── processed_dataset/             # 处理后数据（自动生成）
@@ -188,12 +190,12 @@ set HF_ENDPOINT=https://hf-mirror.com
 
 ### 3. 准备数据集
 
-> **数据集下载说明**：由于CIC-IDS-2017数据集体积较大（约50GB），无法直接包含在GitHub仓库中，请自行下载。
+> **数据集下载说明**：本项目实际使用的是 **CSE-CIC-IDS2018（Friday DDoS）** 与 **UNSW-NB15** 两个数据集，评估 BENIGN / DDoS 的开集多模态融合。数据集体积较大，请自行下载后放入 `data_processing/`：
 >
-> 1. 访问 [CIC-IDS-2017 官方网站](https://www.unb.ca/cic/datasets/ids-2017.html)
-> 2. 点击页面底部的 **"download this dataset"**
-> 3. 完成验证后，按路径导航：`CIC-IDS-2017` → `CSVs` → `GeneratedLabelledFlows.zip`
-> 4. 下载后解压，将CSV文件放入 `data_processing/` 目录
+> - CSE-CIC-IDS2018：https://www.unb.ca/cic/datasets/ids-2018.html
+> - UNSW-NB15：https://research.unsw.edu.au/projects/unsw-nb15-dataset
+>
+> 数据预处理（清洗 / 子集 / 模态分离）会自动完成格式统一，详见下方「运行项目」。
 
 将原始数据集（CSV格式）放入 `data_processing/` 目录，数据集需包含：
 - `Label` 列：值为 `BENIGN`（正常流量）或 `DDoS`（恶意流量）
@@ -201,27 +203,30 @@ set HF_ENDPOINT=https://hf-mirror.com
 
 ### 4. 运行项目
 
-打开 `main.py`，按顺序取消注释执行各步骤：
+所有步骤通过统一入口 `main.py` 的 `--run <配置名>` 执行（配置定义见 `configs/run_configs.py`）。先查看可用配置：
 
-```python
-# 步骤1：数据清洗
-from scripts.data_cleaning import main as run_data_cleaning
-run_data_cleaning()
-
-# 步骤2：提取子集
-success, dataset_id = extract_subset(num_samples=5000, random_state=42)
-
-# 步骤3：模态分离
-dataset_id = 0
-split_modality(dataset_id=dataset_id, test_size=0.2, random_state=42)
-
-# 步骤4：消融实验（全变体）
-run_ablation(variants=["A0","A1","A2","A3"], dataset_id=0, split_id=0, repeat=1, seed=42)
-
-# 步骤5：绘制消融实验结果
-results_df = pd.read_csv("ablation_results/ablation_results_时间戳.csv")
-plot_f1_comparison(results_df)
+```bash
+python main.py --list
 ```
+
+从零跑通闭集（P0）流程：
+
+```bash
+python main.py --run clean
+python main.py --run subset --dataset_id 1
+python main.py --run split  --dataset_id 1
+# 训练 A3（无 LLM，纯 MLP，最快）→ 记录终端打印的 model_id
+python main.py --run train  --dataset_id 1 --split_id 0 --variant A3
+# 训练 A0（含冻结 Qwen，需 GPU）→ 记录 model_id
+python main.py --run train  --dataset_id 1 --split_id 0 --variant A0
+# 测试 A3
+python main.py --run test   --dataset_id 1 --split_id 0 --model_id <A3_model_id>
+# 一次性跑完 A0–A3 消融
+python main.py --run ablation --dataset_id 1 --split_id 0
+```
+
+> 提示：`model_id` 为训练后 `saved_models/` 下的真实目录名（如 `model_9`）。`dataset_id` / `split_id` 建议全程固定（如 1 / 0）。
+> 完整命令参数与开集（P1）流程见 `implementation_guide.md`。
 
 ## Phase 1: 开集未知攻击检测 + 少样本学习
 
@@ -265,70 +270,76 @@ OOD检测头基于**类原型距离**来检测未知样本，实现开集检测�
 
 ### 执行步骤
 
+> 以下均通过 `main.py --run` 调用（避免直接调用底层脚本）。`<A3_model_id>`、`<A0_model_id>`、`<ood_id>` 为前序步骤产出的真实目录名。
+
 #### Step 1 — 构造开集数据
 
-从闭集数据构造开集划分，分离"已知DDoS"和"未知DDoS"。
-
 ```bash
-python scripts/make_openset_split.py --dataset_id 1 --source_split_id 0 --unknown_ratio 0.3
+python main.py --run openset --dataset_id 1 --source_split_id 0 --unknown_ratio 0.3
 ```
 
-产物：`split_data/dataset_1/split_openset_0/`（训练集含已知，测试集含已知+未知）
+产物：`split_data/dataset_1/split_openset_0/`（训练/验证集含已知类，测试集含已知+未知）
 
 #### Step 2 — 构造少样本数据
 
-为每个已知类抽取 k 条样本，构造少样本数据。
+为每个已知类抽取 k 条样本：
 
 ```bash
-python scripts/make_fewshot.py --dataset_id 1 --source_split_id 0 --k_values "5,10,20"
+python main.py --run fewshot --dataset_id 1 --source_split_id 0 --k_per_class 5
+python main.py --run fewshot --dataset_id 1 --source_split_id 0 --k_per_class 10
+python main.py --run fewshot --dataset_id 1 --source_split_id 0 --k_per_class 20
 ```
 
-产物：`split_fewshot_5_0/`、`split_fewshot_10_0/`、`split_fewshot_20_0/`
+产物：`split_data/dataset_1/split_fewshot_<k>_0/`
 
 #### Step 3 — 训练 OOD 检测头
 
-冻结A3 backbone，仅训练原型向量。
+冻结 A3 backbone，仅训练类原型：
 
 ```bash
-# 对每个k值训练
-python scripts/train_ood_head.py --model_id <A3_model_id> --dataset_id 1 --split_id 0 --fewshot_k 5
-python scripts/train_ood_head.py --model_id <A3_model_id> --dataset_id 1 --split_id 0 --fewshot_k 10
-python scripts/train_ood_head.py --model_id <A3_model_id> --dataset_id 1 --split_id 0
+python main.py --run ood_train --model_id <A3_model_id> --dataset_id 1 --split_id 0 --variant A3 --fewshot_k 5
+python main.py --run ood_train --model_id <A3_model_id> --dataset_id 1 --split_id 0 --variant A3 --fewshot_k 10
+python main.py --run ood_train --model_id <A3_model_id> --dataset_id 1 --split_id 0 --variant A3 --fewshot_k 20
 ```
+
+产物：`saved_ood_heads/ood_<id>/`（原型向量 + 阈值）
 
 #### Step 4 — 运行 OOD 路由评估
 
 ```bash
-python scripts/run_ood_routing.py ^
-    --backbone_model_id <A3_model_id> ^
-    --ood_id <ood_id> ^
-    --llm_model_id <A0_model_id> ^
+python main.py --run ood_eval \
+    --backbone_model_id <A3_model_id> \
+    --ood_id <ood_id> \
+    --llm_model_id <A0_model_id> \
     --dataset_id 1 --split_id 0 --fewshot_k 5
 ```
 
+> 注意：`--llm_model_id` 必须显式传入才会调用 Qwen；不传（默认 None）即 A3-only 基线，用于对照。
+
+产物：`ood_reports/ood_routing_<时间戳>.json`（Unknown F1 / Macro-F1 / Recall / Leak Rate）
+
 #### Step 5 — 一键完整实验
 
-如需自动化运行完整Pipeline：
-
 ```bash
-python scripts/run_openworld_experiment.py ^
-    --backbone_model_id <A3_model_id> ^
-    --skip_backbone_train ^
-    --llm_model_id <A0_model_id> ^
+python main.py --run experiment \
+    --backbone_model_id <A3_model_id> \
+    --llm_model_id <A0_model_id> \
+    --dataset_id 1 --split_id 0 \
     --k_values "5,10,20,None"
 ```
+
+自动完成：对每个 k 训 OOD 头 → 路由评估 → 生成汇总。
 
 #### Step 6 — 生成汇总报告
 
 ```bash
-python scripts/report_generator.py
+python main.py --run report
 ```
 
 产物：
-- `openworld_runs_{timestamp}.csv` 每次运行明细
-- `openworld_fewshot.csv` 按k值汇总对比
-- `openworld_experiment_summary_{ts}.md` 可读Markdown报告
-- `openworld_metrics_{timestamp}.json` 结构化指标
+- `openworld_fewshot.csv` 按 k 值汇总对比
+- `openworld_experiment_summary_<ts>.md` 可读 Markdown 报告
+- `openworld_metrics_<timestamp>.json` 结构化指标
 
 ### 核心评估指标
 
