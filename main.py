@@ -193,18 +193,43 @@ def _get_func_params(module_name, func_name):
     return params, func
 
 
-def _parse_override_args(remaining_args, func_params):
+def _infer_arg_type(param_name, func_default, cfg_params):
+    """推断命令行参数的类型，优先从函数默认值，其次从配置 params。"""
+    if isinstance(func_default, bool):
+        return "bool"
+    if isinstance(func_default, int):
+        return "int"
+    if isinstance(func_default, float):
+        return "float"
+    # 函数默认值是 None 或 str 等，尝试从 run 配置中取类型线索
+    if param_name in cfg_params:
+        cfg_val = cfg_params[param_name]
+        if isinstance(cfg_val, bool):
+            return "bool"
+        if isinstance(cfg_val, int):
+            return "int"
+        if isinstance(cfg_val, float):
+            return "float"
+    return "str"
+
+
+def _parse_override_args(remaining_args, func_params, cfg_params=None):
     """解析命令行中额外的 --key value 参数，校验后返回覆盖字典。"""
+    if cfg_params is None:
+        cfg_params = {}
+
     extra_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
 
     for name, info in func_params.items():
         default = info["default"]
-        if isinstance(default, bool):
+        arg_type = _infer_arg_type(name, default, cfg_params)
+
+        if arg_type == "bool":
             extra_parser.add_argument(f"--{name}", action="store_true", default=None, dest=name)
             extra_parser.add_argument(f"--no-{name}", action="store_false", dest=name, default=None)
-        elif isinstance(default, int):
+        elif arg_type == "int":
             extra_parser.add_argument(f"--{name}", type=int, default=None)
-        elif isinstance(default, float):
+        elif arg_type == "float":
             extra_parser.add_argument(f"--{name}", type=float, default=None)
         else:
             extra_parser.add_argument(f"--{name}", type=str, default=None)
@@ -287,7 +312,7 @@ def main():
     func_params_result, func = _get_func_params(module_name, func_name)
 
     if func_params_result is not None and remaining:
-        overrides, unknown = _parse_override_args(remaining, func_params_result)
+        overrides, unknown = _parse_override_args(remaining, func_params_result, cfg_params=params)
         if unknown:
             print(f"错误: 函数 '{func_name}' 没有定义以下参数: {', '.join(unknown)}")
             print(f"该函数支持的参数: {', '.join(func_params_result.keys())}")
