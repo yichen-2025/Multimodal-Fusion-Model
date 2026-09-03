@@ -52,10 +52,21 @@ def evaluate_model(model, dataset, tokenizer=None, device=None):
             stat_vector = stat_vector.to(dtype=target_dtype)
             bert_tensor = bert_tensor.to(dtype=target_dtype)
             
-            # 无LLM时只传stat和bert
-            if model.use_llm and tokenizer is not None:
-                outputs = model(stat_vector, bert_tensor)
+            if model.use_llm and tokenizer is not None and "text" in sample:
+                # LLM 分支：对真实文本做 tokenize，传 input_ids 和 attention_mask
+                text = sample["text"] if sample["text"] else ""
+                encodings = tokenizer(
+                    text,
+                    padding=True,
+                    truncation=True,
+                    max_length=128,
+                    return_tensors="pt"
+                )
+                input_ids = encodings["input_ids"].to(device)
+                attention_mask = encodings["attention_mask"].to(device)
+                outputs = model(stat_vector, bert_tensor, input_ids=input_ids, attention_mask=attention_mask)
             else:
+                # 无 LLM 或无 tokenizer：只传 stat 和 bert
                 outputs = model(stat_vector, bert_tensor)
             
             logits = outputs["logits"]
@@ -379,7 +390,15 @@ def evaluate_open_set_model(model, dataset, tokenizer=None, device=None, num_kno
             bert_tensor = torch.tensor(sample["bert"], dtype=torch.float32).unsqueeze(0).to(device)
             label = sample["label"]
 
-            outputs = model(stat_vector, bert_tensor)
+            if model.use_llm and tokenizer is not None and "text" in sample:
+                text = sample["text"] if sample["text"] else ""
+                encodings = tokenizer(text, padding=True, truncation=True, max_length=128, return_tensors="pt")
+                input_ids = encodings["input_ids"].to(device)
+                attention_mask = encodings["attention_mask"].to(device)
+                outputs = model(stat_vector, bert_tensor, input_ids=input_ids, attention_mask=attention_mask)
+            else:
+                outputs = model(stat_vector, bert_tensor)
+
             logits = outputs["logits"]
             pred = torch.argmax(logits, dim=1).item()
 

@@ -282,8 +282,8 @@ RUN_CONFIG = {
     "ablation": {
         "step": "ablation",
         "params": {
-            "variants": ["A0", "A1", "A2", "A3"],
-            "dataset_id": 1,
+            "variants": ["A3", "A0*", "A0_frozen"],
+            "dataset_id": 3,
             "split_id": 0,
             "model_path": None,
             "output_csv": None,

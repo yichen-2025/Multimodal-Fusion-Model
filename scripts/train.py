@@ -64,10 +64,15 @@ def augmentation_collate_fn(batch, tokenizer=None, max_length=128,
 # 消融实验变体配置映射
 VARIANT_CONFIGS = {
     # 基础模态消融
-    "A0": {"use_numeric": True,  "use_bert": True,  "use_llm": True,  "fusion_type": "concat", "bert_trainable": False},
-    "A1": {"use_numeric": True,  "use_bert": False, "use_llm": True,  "fusion_type": "concat", "bert_trainable": False},
-    "A2": {"use_numeric": False, "use_bert": True,  "use_llm": True,  "fusion_type": "concat", "bert_trainable": False},
-    "A3": {"use_numeric": True,  "use_bert": True,  "use_llm": False, "fusion_type": "concat", "bert_trainable": False},
+    "A0": {"use_numeric": True,  "use_bert": True,  "use_llm": True,  "fusion_type": "concat", "bert_trainable": False, "llm_use_lora": False},
+    "A1": {"use_numeric": True,  "use_bert": False, "use_llm": True,  "fusion_type": "concat", "bert_trainable": False, "llm_use_lora": False},
+    "A2": {"use_numeric": False, "use_bert": True,  "use_llm": True,  "fusion_type": "concat", "bert_trainable": False, "llm_use_lora": False},
+    "A3": {"use_numeric": True,  "use_bert": True,  "use_llm": False, "fusion_type": "concat", "bert_trainable": False, "llm_use_lora": False},
+    # ── 路线 B 新变体 ──
+    "A0*": {"use_numeric": True,  "use_bert": False, "use_llm": True,  "fusion_type": "concat", "bert_trainable": False, "llm_use_lora": True},
+    "A0_frozen": {"use_numeric": True,  "use_bert": False, "use_llm": True,  "fusion_type": "concat", "bert_trainable": False, "llm_use_lora": False},
+    "A0*_no_num": {"use_numeric": False, "use_bert": False, "use_llm": True, "fusion_type": "concat", "bert_trainable": False, "llm_use_lora": True},
+    "A0*_no_text": {"use_numeric": True, "use_bert": False, "use_llm": False, "fusion_type": "concat", "bert_trainable": False, "llm_use_lora": False},
     # 第三阶段改进消融（在A0基础上）
     "B0": {"use_focal_loss": False, "use_prototype_learning": False, "use_augmentation": False},
     "B1": {"use_focal_loss": True,  "use_prototype_learning": False, "use_augmentation": False},
@@ -80,10 +85,14 @@ VARIANT_CONFIGS = {
 }
 
 VARIANT_DESCRIPTIONS = {
-    "A0": "全模型（数值+文本+LLM）",
+    "A0": "全模型（数值+文本+LLM，旧 LLM 用法）",
     "A1": "仅数值+LLM（无文本）",
     "A2": "仅文本+LLM（无数值）",
     "A3": "无LLM（纯MLP分类）",
+    "A0*": "★ 路线B新方案：数值+LLM+LoRA（LLM做文本编码器）",
+    "A0_frozen": "对照组：数值+LLM+全冻结（LLM做文本编码器但不微调）",
+    "A0*_no_num": "对照组：仅 LLM+LoRA 纯文本",
+    "A0*_no_text": "对照组：纯数值（有数值，无文本，无LLM）",
     "B0": "基线模型（无第三阶段改进）",
     "B1": "仅Focal Loss",
     "B2": "仅原型对比学习",
@@ -411,7 +420,10 @@ def train_model(model_path=None,
                 prototype_loss_weight=0.1,
                 use_augmentation=False,
                 aug_noise_std=0.01,
-                aug_prob=0.5):
+                aug_prob=0.5,
+                llm_use_lora=None,
+                lora_r=8,
+                lora_alpha=16):
     """
     训练多模态融合模型
     
@@ -462,13 +474,14 @@ def train_model(model_path=None,
             raise ValueError(f"未知变体: {variant}. 可用变体为: {list(VARIANT_CONFIGS.keys())}")
         config = VARIANT_CONFIGS[variant]
         
-        # A系列：基础模态消融
+        # A系列：基础模态消融（包括 A0*/A0_frozen/A0*_no_num）
         if variant.startswith('A'):
             use_numeric = config['use_numeric']
             use_bert = config['use_bert']
             use_llm = config['use_llm']
             fusion_type = config['fusion_type']
             bert_trainable = config['bert_trainable']
+            llm_use_lora = config.get('llm_use_lora', True)  # 默认用 LoRA
         # B系列：第三阶段改进消融（使用A0作为基础配置）
         elif variant.startswith('B'):
             base_config = VARIANT_CONFIGS['A0']
@@ -493,6 +506,8 @@ def train_model(model_path=None,
             use_bert = True
         if use_llm is None:
             use_llm = True
+        if llm_use_lora is None:
+            llm_use_lora = True  # 默认开启 LoRA
 
     # 无LLM变体不需要GPU强制检查
     if use_llm:
@@ -583,7 +598,10 @@ def train_model(model_path=None,
         focal_gamma=focal_gamma,
         use_prototype_learning=use_prototype_learning,
         prototype_temperature=prototype_temperature,
-        prototype_loss_weight=prototype_loss_weight
+        prototype_loss_weight=prototype_loss_weight,
+        llm_use_lora=llm_use_lora,
+        lora_r=lora_r,
+        lora_alpha=lora_alpha,
     )
     
     # 无LLM时不需要tokenizer

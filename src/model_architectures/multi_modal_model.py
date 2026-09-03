@@ -91,7 +91,12 @@ class MultiModalFusionModel(nn.Module):
                  focal_gamma=2.0,
                  use_prototype_learning=False,
                  prototype_temperature=0.07,
-                 prototype_loss_weight=0.1):
+                 prototype_loss_weight=0.1,
+                 llm_use_lora=True,
+                 lora_r=8,
+                 lora_alpha=16,
+                 lora_dropout=0.05,
+                 lora_target_modules=None):
         """
         初始化多模态融合模型
         
@@ -116,6 +121,11 @@ class MultiModalFusionModel(nn.Module):
             use_prototype_learning (bool): 是否使用类别原型对比学习
             prototype_temperature (float): 原型对比学习的温度参数
             prototype_loss_weight (float): 原型对比学习损失的权重
+            llm_use_lora (bool): 是否使用 LoRA 微调 LLM（True=LoRA adapter 训练，False=全冻结）
+            lora_r (int): LoRA 秩
+            lora_alpha (int): LoRA 缩放系数
+            lora_dropout (float): LoRA dropout
+            lora_target_modules (list): LoRA 目标模块，默认 ["q_proj", "v_proj"]
         """
         super().__init__()
 
@@ -134,6 +144,16 @@ class MultiModalFusionModel(nn.Module):
         self.use_prototype_learning = use_prototype_learning
         self.prototype_temperature = prototype_temperature
         self.prototype_loss_weight = prototype_loss_weight
+
+        # LoRA 配置
+        self.llm_use_lora = llm_use_lora
+        self.lora_r = lora_r
+        self.lora_alpha = lora_alpha
+        self.lora_dropout = lora_dropout
+        self.lora_target_modules = lora_target_modules or ["q_proj", "v_proj"]
+
+        # 标记：LLM 是否被 peft 包装过
+        self._llm_is_peft = False
 
         self._keys_to_ignore_on_save = set()
 
@@ -165,7 +185,13 @@ class MultiModalFusionModel(nn.Module):
             self.bert_encoder = None
 
         # 根据配置确定各模块的维度
-        bert_dim = self.bert_encoder.get_hidden_size() if use_bert else 0
+        # 决定文本模态的来源和维度：LLM 优先（直接编码文本），否则用 BERT
+        if use_llm:
+            text_dim = 0  # 先占位，LLM 加载后 self.hidden_size 会被设置
+        elif use_bert:
+            text_dim = self.bert_encoder.get_hidden_size()
+        else:
+            text_dim = 0
         numeric_dim = numeric_output_dim if use_numeric else 0
 
         # 加载LLM模型（条件加载）
@@ -182,17 +208,46 @@ class MultiModalFusionModel(nn.Module):
                 local_files_only=True
             )
             self.hidden_size = self.llm.config.hidden_size
+            self.llm_model_path = llm_model_path
+
+            # 先冻结全部参数
             for param in self.llm.parameters():
                 param.requires_grad = False
-            self.llm_model_path = llm_model_path
+
+            # 加 LoRA adapter
+            if llm_use_lora:
+                try:
+                    from peft import get_peft_model, LoraConfig, TaskType
+                    lora_config = LoraConfig(
+                        task_type=TaskType.FEATURE_EXTRACTION,
+                        r=lora_r,
+                        lora_alpha=lora_alpha,
+                        lora_dropout=lora_dropout,
+                        target_modules=self.lora_target_modules,
+                        bias="none",
+                    )
+                    self.llm = get_peft_model(self.llm, lora_config)
+                    self._llm_is_peft = True
+                    print(f"LLM 已加载 LoRA adapter (r={lora_r}, target={self.lora_target_modules})")
+                except ImportError:
+                    print("警告: peft 未安装，跳过 LoRA。运行 pip install peft")
+            else:
+                print("LLM 全冻结模式（不使用 LoRA）")
         else:
             self.llm = None
             self.hidden_size = 1536  # 无LLM时使用默认融合输出维度
 
+        # LLM 加载完后，用 LLM 的 hidden_size 更新 text_dim
+        if use_llm and self.hidden_size is not None:
+            text_dim = self.hidden_size
+
+        # 保存文本维度供后续使用
+        self.text_dim = text_dim
+
         # 初始化特征融合投影模块
         self.fusion_projection = FeatureFusionProjection(
             numeric_dim=numeric_dim,
-            bert_dim=bert_dim,
+            bert_dim=text_dim,  # 参数名仍是 bert_dim，语义改为"文本模态特征维度"
             hidden_dim=2048,
             output_dim=self.hidden_size,
             fusion_type=fusion_type
@@ -265,8 +320,8 @@ class MultiModalFusionModel(nn.Module):
         
         Args:
             stat_tensor (torch.Tensor): 数值统计特征，形状为 [batch_size, 9]
-            bert_tensor (torch.Tensor): BERT文本特征，形状为 [batch_size, 768]
-            input_ids (torch.Tensor, optional): 文本prompt的token id
+            bert_tensor (torch.Tensor): BERT文本特征，形状为 [batch_size, 768]（当 use_bert=True 时有效）
+            input_ids (torch.Tensor, optional): 文本的token id（LLM 分支需要）
             attention_mask (torch.Tensor, optional): 注意力掩码
             labels (torch.Tensor, optional): 分类标签
             return_features (bool): 是否在返回中包含融合特征（用于OOD检测）
@@ -277,62 +332,57 @@ class MultiModalFusionModel(nn.Module):
         batch_size = stat_tensor.shape[0]
         target_dtype = next(self.fusion_projection.parameters()).dtype
 
-        # 处理数值特征
+        # ── Step 1: 处理数值特征 ──
         if self.use_numeric:
             stat_tensor = stat_tensor.to(dtype=target_dtype).to(self.device)
             numeric_features = self.numeric_encoder(stat_tensor)
         else:
             numeric_features = torch.zeros(batch_size, 128, dtype=target_dtype, device=self.device)
 
-        # 处理BERT特征
-        if self.use_bert and self.bert_encoder is not None:
-            bert_tensor = bert_tensor.to(dtype=target_dtype).to(self.device)
-        else:
-            bert_tensor = torch.zeros(batch_size, 768, dtype=target_dtype, device=self.device)
+        # ── Step 2: 获取文本向量（两条路径二选一：LLM 或 BERT） ──
+        text_tensor = None
 
-        # 多模态特征融合
-        projected_features = self.fusion_projection(numeric_features, bert_tensor)
-
-        # 分支处理：有LLM或无LLM
         if self.use_llm and self.llm is not None:
-            # 步骤1：获取文本嵌入
+            # 路径 A：LLM 读真实文本 → mean pooling
             if input_ids is not None:
                 input_ids = input_ids.long().to(self.device)
-                text_embeds = self.llm.get_input_embeddings()(input_ids)
-            else:
-                text_embeds = None
-
-            # 步骤2：将融合特征转换为序列形式
-            fusion_embeds = projected_features.unsqueeze(1)
-
-            # 步骤3：拼接融合特征和文本特征
-            if text_embeds is not None:
-                inputs_embeds = torch.cat([fusion_embeds, text_embeds], dim=1)
-            else:
-                inputs_embeds = fusion_embeds
-
-            # 步骤4：处理注意力掩码
-            if attention_mask is not None:
+                if attention_mask is None:
+                    attention_mask = torch.ones_like(input_ids)
                 attention_mask = attention_mask.to(self.device)
-                fusion_mask = torch.ones(batch_size, 1, dtype=attention_mask.dtype).to(self.device)
-                attention_mask = torch.cat([fusion_mask, attention_mask], dim=1)
+
+                outputs = self.llm(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    output_hidden_states=True,
+                )
+
+                # mean pooling：对有效 token 的最后一层 hidden states 做平均
+                # CausalLM 没有 last_hidden_state，需要从 hidden_states tuple 取最后一层
+                last_hidden = outputs.hidden_states[-1]  # [batch, seq_len, hidden]
+                # 注意：用 last_hidden.dtype 替代 .float()，避免在 bf16/bf16 训练时 dtype 冲突
+                mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden.size()).to(dtype=last_hidden.dtype)
+                masked_embeddings = last_hidden * mask_expanded
+                denom = mask_expanded.sum(dim=1)
+                text_tensor = masked_embeddings.sum(dim=1) / (denom + torch.finfo(last_hidden.dtype).eps)
+                # text_tensor: [batch, hidden_size]
             else:
-                attention_mask = torch.ones(inputs_embeds.shape[:2], dtype=inputs_embeds.dtype).to(self.device)
+                # 没有 input_ids，用零向量占位
+                text_tensor = torch.zeros(batch_size, self.hidden_size, dtype=target_dtype, device=self.device)
 
-            # 步骤5：输入LLM进行前向传播
-            outputs = self.llm(
-                inputs_embeds=inputs_embeds,
-                attention_mask=attention_mask,
-                output_hidden_states=True
-            )
+        elif self.use_bert and self.bert_encoder is not None:
+            # 路径 B：使用外部传入的 BERT 嵌入
+            text_tensor = bert_tensor.to(dtype=target_dtype).to(self.device)
 
-            # 步骤6：提取融合特征位置的输出
-            fusion_output = outputs.hidden_states[-1][:, 0, :]
         else:
-            # 无LLM：融合特征直接用于分类
-            fusion_output = projected_features
+            # 无文本模态
+            text_tensor = torch.zeros(batch_size, self.text_dim, dtype=target_dtype, device=self.device)
 
-        # 分类预测
+        # ── Step 3: 外层融合 ──
+        # 融合位置从 LLM 内部移到 LLM 外部！
+        projected_features = self.fusion_projection(numeric_features, text_tensor)
+
+        # ── Step 4: 分类预测 ──
+        fusion_output = projected_features
         logits = self.classifier(fusion_output)
 
         # 类别原型对比学习：将原型相似度添加到 logits
@@ -396,52 +446,68 @@ class MultiModalFusionModel(nn.Module):
         return return_dict
 
     @torch.no_grad()
-    def predict(self, stat_vector, bert_embedding, tokenizer=None, text_prompt=None):
+    def predict(self, stat_vector, bert_embedding=None, tokenizer=None, text=None, text_prompt=None):
         """
         推理预测：对单个样本进行流量分类预测
         
         Args:
             stat_vector: 数值统计特征向量
-            bert_embedding: BERT文本特征向量
-            tokenizer: LLM的tokenizer（无LLM时可为None）
-            text_prompt: 推理时使用的文本提示
+            bert_embedding: BERT文本特征向量（当 use_bert=True 时有效）
+            tokenizer: LLM的tokenizer（当 use_llm=True 时需要）
+            text: 真实文本描述（当 use_llm=True 时需要，传给 LLM 做编码）
+            text_prompt: 向后兼容参数（同 text，旧代码用 text_prompt）
             
         Returns:
             int: 预测标签
         """
+        # 向后兼容：text_prompt 作为 text 的别名
+        if text is None and text_prompt is not None:
+            text = text_prompt
+
         self.eval()
 
         if not isinstance(stat_vector, torch.Tensor):
             stat_vector = torch.tensor(stat_vector, dtype=torch.float32)
-        if not isinstance(bert_embedding, torch.Tensor):
-            bert_embedding = torch.tensor(bert_embedding, dtype=torch.float32)
 
         stat_tensor = stat_vector.unsqueeze(0).to(self.device)
-        bert_tensor = bert_embedding.unsqueeze(0).to(self.device)
 
-        # 无LLM时不需要tokenizer和text_prompt
+        # 构造 bert_tensor（占位）
+        if bert_embedding is not None and not isinstance(bert_embedding, torch.Tensor):
+            bert_embedding = torch.tensor(bert_embedding, dtype=torch.float32)
+        bert_tensor = bert_embedding.unsqueeze(0).to(self.device) if bert_embedding is not None else None
+
+        # LLM 路径：需要真实文本，不再用固定 prompt
+        input_ids = None
+        attention_mask = None
         if self.use_llm and tokenizer is not None:
-            if text_prompt is None:
-                text_prompt = '根据流量特征判断网络流量类型。'
-            inputs = tokenizer(text_prompt, return_tensors="pt").to(self.device)
-            result = self(stat_tensor, bert_tensor, inputs.input_ids, inputs.attention_mask)
-        else:
-            result = self(stat_tensor, bert_tensor)
+            if text is None:
+                text = ''  # fallback
+            inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(self.device)
+            input_ids = inputs.input_ids
+            attention_mask = inputs.attention_mask
+
+        # BERT 路径（无 LLM 时）需要 bert_tensor
+        if bert_tensor is None and (not self.use_llm or self.llm is None):
+            bert_tensor = torch.zeros(1, 768, dtype=torch.float32, device=self.device)
+
+        result = self(stat_tensor, bert_tensor, input_ids=input_ids, attention_mask=attention_mask)
 
         logits = result["logits"]
         pred = torch.argmax(logits, dim=1).item()
         return pred
 
     @torch.no_grad()
-    def extract_fusion_features(self, stat_tensor, bert_tensor):
+    def extract_fusion_features(self, stat_tensor, bert_tensor=None, input_ids=None, attention_mask=None):
         """
-        提取融合特征（不经过LLM和分类器，仅到fusion_projection层）
+        提取融合特征（到 fusion_projection 层）
 
-        用于OOD检测：获取1536维融合特征供OOD头使用
+        用于 OOD 检测：获取 hidden_size 维融合特征供 OOD 头使用
 
         Args:
             stat_tensor (torch.Tensor): 数值统计特征 [batch_size, 9]
-            bert_tensor (torch.Tensor): BERT文本特征 [batch_size, 768]
+            bert_tensor (torch.Tensor, optional): BERT 文本特征 [batch_size, 768]
+            input_ids (torch.Tensor, optional): 文本 token ids（LLM 分支）
+            attention_mask (torch.Tensor, optional): 注意力掩码（LLM 分支）
 
         Returns:
             torch.Tensor: 融合投影特征 [batch_size, hidden_size]
@@ -450,18 +516,36 @@ class MultiModalFusionModel(nn.Module):
         batch_size = stat_tensor.shape[0]
         target_dtype = next(self.fusion_projection.parameters()).dtype
 
+        # 处理数值特征
         if self.use_numeric:
             stat_tensor = stat_tensor.to(dtype=target_dtype).to(self.device)
             numeric_features = self.numeric_encoder(stat_tensor)
         else:
             numeric_features = torch.zeros(batch_size, 128, dtype=target_dtype, device=self.device)
 
-        if self.use_bert and self.bert_encoder is not None:
-            bert_tensor = bert_tensor.to(dtype=target_dtype).to(self.device)
-        else:
-            bert_tensor = torch.zeros(batch_size, 768, dtype=target_dtype, device=self.device)
+        # 获取文本向量（与 forward 相同的逻辑）
+        if self.use_llm and self.llm is not None and input_ids is not None:
+            input_ids = input_ids.long().to(self.device)
+            if attention_mask is None:
+                attention_mask = torch.ones_like(input_ids)
+            attention_mask = attention_mask.to(self.device)
 
-        projected_features = self.fusion_projection(numeric_features, bert_tensor)
+            outputs = self.llm(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
+            )
+            # CausalLM: 从 hidden_states tuple 取最后一层
+            last_hidden = outputs.hidden_states[-1]
+            mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden.size()).to(dtype=last_hidden.dtype)
+            denom = mask_expanded.sum(dim=1)
+            text_tensor = (last_hidden * mask_expanded).sum(dim=1) / (denom + torch.finfo(last_hidden.dtype).eps)
+        elif self.use_bert and bert_tensor is not None:
+            text_tensor = bert_tensor.to(dtype=target_dtype).to(self.device)
+        else:
+            text_tensor = torch.zeros(batch_size, self.text_dim, dtype=target_dtype, device=self.device)
+
+        projected_features = self.fusion_projection(numeric_features, text_tensor)
         return projected_features
 
     def get_feature_dim(self):
@@ -477,22 +561,34 @@ class MultiModalFusionModel(nn.Module):
     def state_dict(self, *args, **kwargs):
         """
         覆写state_dict，只返回可训练参数
+        使用 requires_grad 判断（适配 peft 包装后 key 前缀变化）
         """
         full_state = super().state_dict(*args, **kwargs)
         trainable_state = {
             k: v for k, v in full_state.items()
-            if not k.startswith('llm.') and not k.startswith('bert_encoder.')
+            if v.requires_grad
         }
+        # 如果全冻结（包括 LoRA 关闭），fallback 到旧的前缀过滤
+        if len(trainable_state) == 0:
+            trainable_state = {
+                k: v for k, v in full_state.items()
+                if not k.startswith('llm.') and not k.startswith('bert_encoder.')
+                and 'base_model' not in k
+            }
         return trainable_state
 
     def load_state_dict(self, state_dict, *args, **kwargs):
         """
         覆写load_state_dict，只加载可训练参数
         """
-        filtered_state_dict = {
-            k: v for k, v in state_dict.items()
-            if not k.startswith('llm.') and not k.startswith('bert_encoder.')
-        }
+        filtered_state_dict = {}
+        for k, v in state_dict.items():
+            # 排除冻结的 LLM 底座参数和 BERT 参数
+            if k.startswith('llm.') or k.startswith('bert_encoder.'):
+                continue
+            if 'base_model.model.llm' in k and 'lora_' not in k:
+                continue
+            filtered_state_dict[k] = v
         return super().load_state_dict(filtered_state_dict, *args, **kwargs)
 
     def save_pretrained(self, save_dir):
@@ -525,6 +621,15 @@ class MultiModalFusionModel(nn.Module):
             'use_prototype_learning': self.use_prototype_learning,
             'prototype_temperature': self.prototype_temperature,
             'prototype_loss_weight': self.prototype_loss_weight,
+            # LoRA 配置
+            'llm_use_lora': self.llm_use_lora,
+            'lora_r': self.lora_r,
+            'lora_alpha': self.lora_alpha,
+            'lora_dropout': self.lora_dropout,
+            'lora_target_modules': self.lora_target_modules,
+            # 文本维度信息
+            'text_dim': self.text_dim,
+            '_llm_is_peft': self._llm_is_peft,
         }
         
         if self.class_weights is not None:
@@ -563,6 +668,15 @@ class MultiModalFusionModel(nn.Module):
         
         torch.save(trainable_state, os.path.join(save_dir, 'pytorch_model.bin'))
         print(f"模型可训练参数已保存到 {os.path.abspath(save_dir)}")
+
+        # 如果用了 LoRA，额外保存 adapter 权重
+        if self._llm_is_peft and self.llm is not None:
+            try:
+                lora_dir = os.path.join(save_dir, 'lora_adapter')
+                self.llm.save_pretrained(lora_dir)
+                print(f"LoRA adapter 已保存到 {os.path.abspath(lora_dir)}")
+            except Exception as e:
+                print(f"保存 LoRA adapter 时出错: {e}")
 
     @classmethod
     def from_pretrained(cls, llm_model_path_or_save_dir, save_dir=None):
@@ -614,6 +728,17 @@ class MultiModalFusionModel(nn.Module):
         prototype_temperature = config.get('prototype_temperature', 0.07)
         prototype_loss_weight = config.get('prototype_loss_weight', 0.1)
         
+        # LoRA 配置（新增）
+        llm_use_lora = config.get('llm_use_lora', True)
+        lora_r = config.get('lora_r', 8)
+        lora_alpha = config.get('lora_alpha', 16)
+        lora_dropout = config.get('lora_dropout', 0.05)
+        lora_target_modules = config.get('lora_target_modules', None)
+        
+        # ⚠️ 关键：先以"不启用 LoRA"的方式创建模型
+        # 这样 __init__ 只会加载原始 LLM（保持正确的 dtype: bf16 on GPU / float32 on CPU），
+        # 不会提前套一层空的 LoRA adapter，避免后面 PeftModel.from_pretrained 再套一层导致
+        # 重复 adapter 和 dtype 漂移（safetensors 加载默认 float32）。
         model = cls(
             llm_model_path=llm_model_path,
             bert_model_path=config.get('bert_model_path', './models/bert'),
@@ -634,9 +759,48 @@ class MultiModalFusionModel(nn.Module):
             focal_gamma=focal_gamma,
             use_prototype_learning=use_prototype_learning,
             prototype_temperature=prototype_temperature,
-            prototype_loss_weight=prototype_loss_weight
+            prototype_loss_weight=prototype_loss_weight,
+            llm_use_lora=False,   # ← 关闭，后面手动加载保存的 LoRA
+            lora_r=lora_r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            lora_target_modules=lora_target_modules,
         )
-        
+
+        # 加载保存的 LoRA adapter（如果存在）
+        lora_adapter_dir = os.path.join(save_dir, 'lora_adapter')
+        if os.path.isdir(lora_adapter_dir) and llm_use_lora:
+            try:
+                from peft import PeftModel
+                # PeftModel.from_pretrained 会在不改变底座 dtype 的前提下加载 adapter
+                # lora_adapter/ 目录里有 adapter_config.json + adapter_model.safetensors
+                base_dtype = next(model.llm.parameters()).dtype
+                model.llm = PeftModel.from_pretrained(model.llm, lora_adapter_dir, is_trainable=False)
+                model._llm_is_peft = True
+                print(f"LoRA adapter 已从 {lora_adapter_dir} 加载 (dtype={base_dtype})")
+                # 兜底：确保整个 PeftModel 保持与底座一致的 dtype
+                model.llm = model.llm.to(dtype=base_dtype)
+            except Exception as e:
+                print(f"加载 LoRA adapter 时出错: {e}")
+                model._llm_is_peft = False
+
+        # 把 numeric / fusion / classifier 等模块同步到 LLM 的 dtype
+        # CPU 上 float32，GPU 上 bf16
+        if model.llm is not None:
+            llm_dtype = next(model.llm.parameters()).dtype
+            model.numeric_encoder.to(dtype=llm_dtype)
+            model.fusion_projection.to(dtype=llm_dtype)
+            model.classifier.to(dtype=llm_dtype)
+            if model.temperature is not None:
+                model.temperature.data = model.temperature.data.to(dtype=llm_dtype)
+            if model.bert_encoder is not None:
+                model.bert_encoder.to(dtype=llm_dtype)
+            if model.class_prototypes is not None:
+                model.class_prototypes.data = model.class_prototypes.data.to(dtype=llm_dtype)
+            if model.prototype_projection is not None:
+                model.prototype_projection.to(dtype=llm_dtype)
+
+        # 加载训练好的可训练参数权重
         model.numeric_encoder.load_state_dict(state_dict['numeric_encoder'])
         model.fusion_projection.load_state_dict(state_dict['fusion_projection'])
         model.classifier.load_state_dict(state_dict['classifier'])
@@ -649,6 +813,22 @@ class MultiModalFusionModel(nn.Module):
         
         if 'prototype_projection' in state_dict and model.prototype_projection is not None:
             model.prototype_projection.load_state_dict(state_dict['prototype_projection'])
-        
+
+        # 最终保险：state_dict 通过 torch.load('cpu') 加载后可能丢失 bf16 精度，
+        # 再次把所有模块强制同步到 LLM 的 dtype（bf16 on GPU / float32 on CPU）
+        if model.llm is not None:
+            llm_dtype = next(model.llm.parameters()).dtype
+            model.numeric_encoder.to(dtype=llm_dtype)
+            model.fusion_projection.to(dtype=llm_dtype)
+            model.classifier.to(dtype=llm_dtype)
+            if model.temperature is not None:
+                model.temperature.data = model.temperature.data.to(dtype=llm_dtype)
+            if model.bert_encoder is not None:
+                model.bert_encoder.to(dtype=llm_dtype)
+            if model.class_prototypes is not None:
+                model.class_prototypes.data = model.class_prototypes.data.to(dtype=llm_dtype)
+            if model.prototype_projection is not None:
+                model.prototype_projection.to(dtype=llm_dtype)
+
         print(f"模型参数已从 {os.path.abspath(save_dir)} 加载")
         return model
