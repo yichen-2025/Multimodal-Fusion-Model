@@ -203,6 +203,7 @@ def save_test_report(report_data):
         'fusion_type': report_data.get('fusion_type', ''),
         'bert_trainable': report_data.get('bert_trainable', ''),
         'trainable_params': report_data.get('trainable_params', ''),
+        'llm_use_lora': report_data.get('llm_use_lora', ''),
     }
     
     if os.path.exists(INDEX_FILE):
@@ -218,7 +219,7 @@ def save_test_report(report_data):
                                            'accuracy', 'precision', 'recall', 'f1',
                                            'tp', 'tn', 'fp', 'fn', 'duration_seconds',
                                            'variant', 'use_numeric', 'use_bert', 'use_llm',
-                                           'fusion_type', 'bert_trainable', 'trainable_params'])
+                                           'fusion_type', 'bert_trainable', 'trainable_params', 'llm_use_lora'])
         df = pd.concat([df, pd.DataFrame([csv_row])], ignore_index=True)
     else:
         df = pd.DataFrame([csv_row])
@@ -232,6 +233,8 @@ def save_test_report(report_data):
 
 def test_model(dataset_id=0, split_id=0, model_id=0, 
                llm_model_path=None, 
+               variant=None,
+               llm_use_lora=None,
                verbose=True,
                save_report=True):
     """
@@ -339,9 +342,11 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
                 'use_bert': model.use_bert,
                 'use_llm': model.use_llm,
                 'fusion_type': model.fusion_type,
-                'bert_trainable': model.bert_trainable
+                'bert_trainable': model.bert_trainable,
+                'llm_use_lora': getattr(model, 'llm_use_lora', llm_use_lora)
             },
-            'variant': None,
+            'variant': variant,
+            'llm_use_lora': getattr(model, 'llm_use_lora', llm_use_lora),
             'use_numeric': model.use_numeric,
             'use_bert': model.use_bert,
             'use_llm': model.use_llm,
@@ -504,6 +509,7 @@ def main():
     parser.add_argument("--split_id", type=int, default=0, help="划分ID")
     parser.add_argument("--openset", action="store_true", help="加载开集划分（split_openset）")
     parser.add_argument("--no_save_report", action="store_true", help="不保存测试报告")
+    parser.add_argument("--variant", type=str, default=None, help="变体名称（如 A0*, A0_frozen, A3），写入报告用于区分")
     args = parser.parse_args()
 
     if args.model_path is None:
@@ -614,12 +620,13 @@ def main():
                 'fusion_type': model.fusion_type,
                 'bert_trainable': model.bert_trainable
             },
-            'variant': None,
+            'variant': args.variant,
             'use_numeric': model.use_numeric,
             'use_bert': model.use_bert,
             'use_llm': model.use_llm,
             'fusion_type': model.fusion_type,
             'bert_trainable': model.bert_trainable,
+            'llm_use_lora': getattr(model, 'llm_use_lora', None),
             'trainable_params': trainable_params
         }
         

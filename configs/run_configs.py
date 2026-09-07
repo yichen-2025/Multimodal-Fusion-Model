@@ -233,7 +233,7 @@ RUN_CONFIG = {
         "step": "train",
         "params": {
             "variant": "A0",
-            "dataset_id": 2,
+            "dataset_id": 0,
             "split_id": 0,
             "model_path": None,
             "output_dir": None,
@@ -271,9 +271,9 @@ RUN_CONFIG = {
     "test": {
         "step": "test",
         "params": {
-            "dataset_id": 3,
+            "dataset_id": 0,
             "split_id": 0,
-            "model_id": 15,
+            "model_id": 0,
             "llm_model_path": None,
             "verbose": True,
             "save_report": True
@@ -283,7 +283,7 @@ RUN_CONFIG = {
         "step": "ablation",
         "params": {
             "variants": ["A3", "A0*", "A0_frozen"],
-            "dataset_id": 3,
+            "dataset_id": 0,
             "split_id": 0,
             "model_path": None,
             "output_csv": None,
@@ -296,7 +296,7 @@ RUN_CONFIG = {
     "openset": {
         "step": "openset",
         "params": {
-            "dataset_id": 1,
+            "dataset_id": 0,
             "source_split_id": 0,
             "output_split_id": None,
             "unknown_ratio": 0.3,
@@ -307,7 +307,7 @@ RUN_CONFIG = {
     "fewshot": {
         "step": "fewshot",
         "params": {
-            "dataset_id": 1,
+            "dataset_id": 0,
             "source_split_id": 0,
             "k_per_class": 5,
             "output_split_id": None,
@@ -318,9 +318,9 @@ RUN_CONFIG = {
     "ood_train": {
         "step": "ood-train",
         "params": {
-            "model_id": 9,
+            "model_id": 0,
             "ood_id": None,
-            "dataset_id": 1,
+            "dataset_id": 0,
             "split_id": 0,
             "model_path": None,
             "variant": "A3",
@@ -336,10 +336,10 @@ RUN_CONFIG = {
     "ood_eval": {
         "step": "ood-eval",
         "params": {
-            "backbone_model_id": 9,
-            "ood_id": 1,
+            "backbone_model_id": 0,
+            "ood_id": 0,
             "llm_model_id": None,
-            "dataset_id": 1,
+            "dataset_id": 0,
             "split_id": 0,
             "model_path": None,
             "backbone_variant": "A3",
@@ -353,10 +353,10 @@ RUN_CONFIG = {
     "experiment": {
         "step": "experiment",
         "params": {
-            "dataset_id": 1,
+            "dataset_id": 0,
             "split_id": 0,
             "k_values": [5, 10, 20, None],
-            "backbone_model_id": 9,
+            "backbone_model_id": 0,
             "llm_model_id": None,
             "model_path": None,
             "backbone_variant": "A3",

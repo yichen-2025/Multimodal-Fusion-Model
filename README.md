@@ -6,27 +6,33 @@
 
 本项目实现了一个多模态融合模型，用于网络流量恶意检测。模型将网络流量数据转换为两种模态：
 
-1. **统计特征模态**：9维数值特征（如包长度均值、端口号等）
-2. **文本描述模态**：768维BERT语义嵌入
+1. **统计特征模态**：9维数值特征（如包长度均值、端口号等），经数值编码器处理。
+2. **文本描述模态**：将流量特征转换为中文自然语言描述。基线变体 **A3** 用 BERT 提取 768 维语义嵌入；含 LLM 的变体（A0/A0\*/A0_frozen/A0\*_no_num）改用 **Qwen2.5-1.5B 作文本编码器**（对真实中文文本做 mean pooling，输出 1536 维文本向量）。
 
-通过多模态融合技术，将两种模态的特征进行融合，结合LLM（Qwen2.5）进行分类。项目同时提供消融实验功能，可对比不同模态组合的性能。
+通过多模态融合技术，在 **LLM 外部**完成数值与文本特征的融合后送入分类头。LLM 在此**不再充当分类器**，而是作为「文本语义编码器」；BERT 仅在 A3 基线中充当文本编码器。项目提供闭集消融实验，对比不同模态组合与 LLM 用法的有效性。
 
 ### 核心特性
 
-- **多模态融合**：数值特征与文本语义特征的高效融合
-- **消融实验**：支持A0/A1/A2/A3四种变体对比
-- **开集检测 (OOD)**：通过原型距离检测未知DDoS攻击
-- **LLM路由**：未知样本交由LLM进行语义推理判定
-- **少样本学习**：支持k=5/10/20等少样本训练配置
+- **多模态融合**：数值特征与文本语义特征在 LLM 外部高效融合
+- **LLM 文本编码器（路线 B）**：Qwen2.5-1.5B 冻结底座 + 可选 LoRA（q/v，r=8）作为文本编码器，A0\* 变体启用
+- **闭集消融**：支持 A3 / A0 / A0\* / A0_frozen / A0\*_no_num / A0\*_no_text 六变体对比
+- **开集检测 (OOD)**：基于类原型距离检测未知攻击（研究中，见 Phase 1）
+- **少样本学习**：支持 k=5/10/20 等少样本训练配置
 
-## 消融实验变体
+## 闭集消融变体（6 变体故事线）
 
-| 变体 | 数值模态 | 文本模态 | LLM | 描述 |
-|------|---------|---------|-----|------|
-| A0 | ✓ | ✓ | ✓ | 全模型（数值+文本+LLM） |
-| A1 | ✓ | ✗ | ✓ | 仅数值+LLM（无文本） |
-| A2 | ✗ | ✓ | ✓ | 仅文本+LLM（无数值） |
-| A3 | ✓ | ✓ | ✗ | 无LLM（纯MLP分类） |
+> 架构已修正（路线 B）：当 `use_llm=True` 时，LLM 文本编码路径优先，BERT 分支被绕过（即便 `use_bert=True` 也不参与）；融合在 LLM 外部完成。下表「文本来源」以实际生效路径为准。
+
+| 变体 | 数值 | 文本来源 | LLM / LoRA | 角色定位 |
+|------|------|---------|-----------|---------|
+| A3 | ✓ | BERT（768维） | ✗ | **基线**：数值+BERT，纯 MLP 分类 |
+| A0 | ✓ | LLM 文本编码（1536维） | ✓ / 全冻结 | 旧用法对照（无 LoRA，BERT 闲置） |
+| A0\* | ✓ | LLM 文本编码（1536维） | ✓ / **LoRA** | ★ 新方案核心：LLM 作文本编码器 + 领域适配 |
+| A0_frozen | ✓ | LLM 文本编码（1536维） | ✓ / 全冻结 | LoRA 对照组（与 A0\* 比 LoRA 增益） |
+| A0\*_no_num | ✗ | LLM 文本编码（1536维） | ✓ / LoRA | 模态贡献：仅文本 |
+| A0\*_no_text | ✓ | 无 | ✗ | 模态贡献：仅数值 |
+
+六变体回答四个递进问题：① LLM 作文本编码器行不行（A0\* vs A3）；② 旧用法是「放错位置」而非「LLM 没用」（A0\* vs A0）；③ LoRA 领域适配有无用（A0\* vs A0_frozen）；④ 数值/文本各自贡献（A0\* / A0\*_no_num / A0\*_no_text）。
 
 ## 目录结构
 
@@ -213,36 +219,38 @@ python main.py --list
 
 ```bash
 python main.py --run clean
-python main.py --run subset --dataset_id 1
-python main.py --run split  --dataset_id 1
+python main.py --run subset --dataset_id 3
+python main.py --run split  --dataset_id 3
 # 训练 A3（无 LLM，纯 MLP，最快）→ 记录终端打印的 model_id
-python main.py --run train  --dataset_id 1 --split_id 0 --variant A3
-# 训练 A0（含冻结 Qwen，需 GPU）→ 记录 model_id
-python main.py --run train  --dataset_id 1 --split_id 0 --variant A0
+python main.py --run train  --dataset_id 3 --split_id 0 --variant A3
+# 训练 A0*（含冻结 Qwen + LoRA，需 GPU）→ 记录 model_id
+python main.py --run train  --dataset_id 3 --split_id 0 --variant A0*
 # 测试 A3
-python main.py --run test   --dataset_id 1 --split_id 0 --model_id <A3_model_id>
-# 一次性跑完 A0–A3 消融
-python main.py --run ablation --dataset_id 1 --split_id 0
+python main.py --run test   --dataset_id 3 --split_id 0 --model_id <A3_model_id>
+# 一次性跑闭集消融（默认覆盖 A3 / A0* / A0_frozen；全六变体加 --variants）
+python main.py --run ablation --dataset_id 3 --split_id 0
 ```
 
-> 提示：`model_id` 为训练后 `saved_models/` 下的真实目录名（如 `model_9`）。`dataset_id` / `split_id` 建议全程固定（如 1 / 0）。
+> 提示：`model_id` 为训练后 `saved_models/` 下的真实目录名（如 `model_9`）。`dataset_id` / `split_id` 建议全程固定。
+> **数据集 ID 说明**：当前分支 `split_data/` 含 `dataset_0/2/3/4/5`（多分类，12/15 类），旧分支的 `dataset_1` 已不存在；请以 `split_data/` 下实际存在的 ID 为准，推荐 **dataset_3（15 类，最难）** 为闭集主基准、**dataset_0（12 类）** 为复现。
 > 完整命令参数与开集（P1）流程见 `implementation_guide.md`。
 
-## Phase 1: 开集未知攻击检测 + 少样本学习
+## Phase 1: 开集未知攻击检测 + 少样本学习（研究中，尚未跑通）
 
-Phase 1 旨在制造LLM用武之地，通过对比 A3(无LLM) 与 A0(有LLM) 在开集/少样本场景下的性能差距，证明LLM在复杂场景下的独特价值。
+> **状态（2026-09-03）**：本阶段对应项目 Phase 1 主假设——「开集（未知攻击）场景下，以 LLM 作文本编码器的主干（A0\*）融合特征，比无 LLM 主干（A3）具有更好的分布外（OOD）可分性，从而在 **Unknown F1 / AUROC** 上显著更优」。该假设**尚未被有效验证**：2026-08-28 的一次探索性运行因 OOD 脚本集成缺陷（`unknown_f1=0.0`）已失效，结论须重做。
+>
+> **方法调整（重要）**：原计划中「未知样本交由 LLM 生成式路由做语义推理」的设计存在**结构性缺陷**（闭集 `argmax` 永远无法输出 `unknown`，见下方 BUG D），已决定**放弃生成式路由**，改为更干净、可直接支撑假设的方案：**所有主干共用同一个原型距离 OOD 头，公平对比「主干特征质量」**（A3 vs A0_frozen vs A0\*）。
 
-### 核心架构：OOD检测头 (OOD Head)
+### 核心架构：共享 OOD 检测头（原型距离）
 
-OOD检测头基于**类原型距离**来检测未知样本，实现开集检测能力。
+OOD 检测头基于**类原型距离**检测未知样本；同一套头分别接在不同主干的融合特征上，比较的是「主干特征本身的 OOD 可分性」而非检测算法。
 
-**架构流程**：
 ```
-输入: A3融合特征 (batch, 1536维)
+任一主干 (A3 / A0_frozen / A0*) 的融合特征 (batch, D维)
   │
-  ├── 计算与每个类原型（可学习向量）的距离
-  ├── 距离 → 温度缩放 → softmax → 已知类概率
-  ├── 最小距离 > 自适应阈值? → 标记为 unknown
+  ├── OOD 头：计算与每个已知类原型的 distance
+  ├── distance → 温度缩放 → softmax → 已知类概率
+  ├── 最小 distance > 自适应阈值? → 标记为 unknown
   │
 输出: {distances, scores, unknown_mask, pred_labels}
 ```
@@ -250,94 +258,73 @@ OOD检测头基于**类原型距离**来检测未知样本，实现开集检测�
 **关键设计**：
 - **可训练原型**：每个已知类一个可学习的原型向量（`nn.Parameter`）
 - **距离度量**：支持欧氏距离/余弦距离/马氏距离
-- **自适应阈值**：在验证集上搜索最优F1对应的阈值
+- **自适应阈值**：在验证集上搜索最优 F1 对应的阈值
 - **Center-Loss**：训练时拉近同类特征与原型的距离
+- **OOD 来源**：用 `make_openset_split.py` 的**留出类别**策略（真实分布偏移），而非随机打标
 
-### 开集路由机制
+### ⚠️ 当前执行阻塞（OOD 流水线脚本待修，来自阶段规划）
 
-```
-测试样本
-  │
-  ├── 提取A3融合特征
-  ├── OODHead 判定
-  │
-  ├── known (distance ≤ threshold)
-  │   └── A3分类器 → 预测 benign / known_DDoS
-  │
-  └── unknown (distance > threshold)
-      └── A0 (Qwen LLM) → 语义推理 → "正常流量" or "DDoS攻击"
-```
+| BUG | 位置 | 问题 | 后果 |
+|-----|------|------|------|
+| A | `train_ood_head.py` 165–168/177；`run_ood_routing.py` 320–324/357 | `collate_fn(use_llm=False)` 且只传 `(stat, bert)`，**未传 `input_ids`** | A0\*/A0_frozen 的 LLM 文本分支取不到 input_ids，文本张量退化为**全零**，OOD 流水线里实际只用数值特征（根因） |
+| B | 两脚本 `variant_configs` 仅含 A0/A1/A2/A3 | 缺 A0\*/A0_frozen/A0\*_no_num/A0\*_no_text | 无法对比 A0\* vs A3 |
+| C | 两脚本 DataLoader 全 `use_llm=False` | 无 input_ids 产出 | 与 BUG A 同源 |
+| D | `run_ood_routing.py` 把 unknown 交给 `llm_model.predict()`（闭集 argmax） | 只能输出 0..K-1 已知类，**永不输出 unknown** | 生成式路由结构不可行 → 已决定放弃，改 OOD 头特征质量对比 |
 
-### 执行步骤
+> 上述脚本修复（P0 修集成，约 0.5–1 天）完成后，方可按下方步骤执行；08-28 的 `openworld_*` 旧结果不可引用。
 
-> 以下均通过 `main.py --run` 调用（避免直接调用底层脚本）。`<A3_model_id>`、`<A0_model_id>`、`<ood_id>` 为前序步骤产出的真实目录名。
+### 执行步骤（待脚本修复后）
 
-#### Step 1 — 构造开集数据
+> 通过 `main.py --run` 调用。`<A3_id>`、`<A0*_id>`、`<ood_id>` 为前序步骤真实目录名。主战场用 **dataset_3（15 类，最难）**，复现用 dataset_0（12 类）。
+
+#### Step 1 — 构造开集数据（留出类别→unknown）
 
 ```bash
-python main.py --run openset --dataset_id 1 --source_split_id 0 --unknown_ratio 0.3
+python main.py --run openset --dataset_id 3 --source_split_id 0 --unknown_ratio 0.3
 ```
 
-产物：`split_data/dataset_1/split_openset_0/`（训练/验证集含已知类，测试集含已知+未知）
+产物：`split_data/dataset_3/split_openset_0/`（train/val 不含未知，test 含 `unknown`）
 
 #### Step 2 — 构造少样本数据
 
-为每个已知类抽取 k 条样本：
-
 ```bash
-python main.py --run fewshot --dataset_id 1 --source_split_id 0 --k_per_class 5
-python main.py --run fewshot --dataset_id 1 --source_split_id 0 --k_per_class 10
-python main.py --run fewshot --dataset_id 1 --source_split_id 0 --k_per_class 20
+python main.py --run fewshot --dataset_id 3 --source_split_id 0 --k_per_class 5
+python main.py --run fewshot --dataset_id 3 --source_split_id 0 --k_per_class 10
+python main.py --run fewshot --dataset_id 3 --source_split_id 0 --k_per_class 20
 ```
 
-产物：`split_data/dataset_1/split_fewshot_<k>_0/`
+产物：`split_data/dataset_3/split_fewshot_<k>_0/`
 
-#### Step 3 — 训练 OOD 检测头
-
-冻结 A3 backbone，仅训练类原型：
+#### Step 3 — 训练 OOD 检测头（在 A3 / A0_frozen / A0\* 主干上各训一个）
 
 ```bash
-python main.py --run ood_train --model_id <A3_model_id> --dataset_id 1 --split_id 0 --variant A3 --fewshot_k 5
-python main.py --run ood_train --model_id <A3_model_id> --dataset_id 1 --split_id 0 --variant A3 --fewshot_k 10
-python main.py --run ood_train --model_id <A3_model_id> --dataset_id 1 --split_id 0 --variant A3 --fewshot_k 20
+# 先确保对应闭集主干已训好存档
+python main.py --run ood_train --model_id <A3_id>       --dataset_id 3 --split_id 0 --variant A3        --fewshot_k 5
+python main.py --run ood_train --model_id <A0*_id>      --dataset_id 3 --split_id 0 --variant A0*       --fewshot_k 5
+python main.py --run ood_train --model_id <A0_frozen_id> --dataset_id 3 --split_id 0 --variant A0_frozen --fewshot_k 5
 ```
 
 产物：`saved_ood_heads/ood_<id>/`（原型向量 + 阈值）
 
-#### Step 4 — 运行 OOD 路由评估
+#### Step 4 — 评测（OOD 头特征质量对比）
 
 ```bash
 python main.py --run ood_eval \
-    --backbone_model_id <A3_model_id> \
+    --backbone_model_id <A0*_id> \
     --ood_id <ood_id> \
-    --llm_model_id <A0_model_id> \
-    --dataset_id 1 --split_id 0 --fewshot_k 5
+    --dataset_id 3 --split_id 0 --fewshot_k 5
 ```
 
-> 注意：`--llm_model_id` 必须显式传入才会调用 Qwen；不传（默认 None）即 A3-only 基线，用于对照。
+产物：`ood_reports/ood_routing_<时间戳>.json`（Unknown F1 / AUROC / Macro-F1 / Recall）
 
-产物：`ood_reports/ood_routing_<时间戳>.json`（Unknown F1 / Macro-F1 / Recall / Leak Rate）
-
-#### Step 5 — 一键完整实验
-
-```bash
-python main.py --run experiment \
-    --backbone_model_id <A3_model_id> \
-    --llm_model_id <A0_model_id> \
-    --dataset_id 1 --split_id 0 \
-    --k_values "5,10,20,None"
-```
-
-自动完成：对每个 k 训 OOD 头 → 路由评估 → 生成汇总。
-
-#### Step 6 — 生成汇总报告
+#### Step 5 — 生成汇总报告
 
 ```bash
 python main.py --run report
 ```
 
 产物：
-- `openworld_fewshot.csv` 按 k 值汇总对比
+- `openworld_fewshot.csv` 按 k 值 / 主干汇总对比
 - `openworld_experiment_summary_<ts>.md` 可读 Markdown 报告
 - `openworld_metrics_<timestamp>.json` 结构化指标
 
@@ -345,12 +332,11 @@ python main.py --run report
 
 | 指标 | 说明 |
 |------|------|
-| Macro-F1 | 三分类（benign/known/unknown）宏平均F1 |
-| **Unknown F1** | 将unknown视为正类的F1（**核心指标**） |
-| Unknown Recall | 未知DDoS被正确检测的比例 |
-| Unknown Leak Rate | 未知DDoS被误判为known的比例 |
-| Benign Recall | 正常流量召回率 |
-| Known DDoS Recall | 已知DDoS召回率 |
+| Macro-F1 | 已知类 + unknown 宏平均 F1 |
+| **Unknown F1** | 将 unknown 视为正类的 F1（**核心指标**） |
+| Unknown Recall | 未知攻击被正确检测的比例 |
+| **AUROC** | 阈值无关的 OOD 可分性（推荐主报） |
+| Known Macro-F1 | 确认「开集不损闭集」 |
 
 ## 主键体系
 
@@ -401,15 +387,14 @@ python -m pytest tests/test_project.py -v
 
 ## 项目原理
 
-本项目采用多模态融合架构，将网络流量数据的两种模态进行融合分类：
+本项目采用「LLM 作文本编码器 + 外部融合」的多模态架构，将网络流量数据的两种模态进行融合分类：
 
-1. **统计特征模态**：从网络流量中提取9维数值特征（如包长度均值、端口号等），通过数值编码器进行处理
-2. **文本描述模态**：将流量特征转换为自然语言描述，使用预训练BERT模型提取768维语义嵌入
-3. **融合投影层**：将两种模态的特征进行融合，通过投影层映射到统一的特征空间
-4. **LLM分类**：融合特征输入Qwen2.5 LLM，利用其推理能力进行流量分类
-5. **消融实验**：通过控制各模态的启用状态，验证各组件对分类性能的贡献
-6. **开集检测 (OOD)**：基于类原型距离检测未知攻击样本，实现开集识别能力
-7. **LLM路由**：未知样本交由LLM进行语义推理，已知样本走高效的A3分类器
-8. **少样本学习**：在少量训练样本（k=5/10/20）下验证模型的泛化能力
+1. **统计特征模态**：从网络流量中提取 9 维数值特征（如包长度均值、端口号等），通过数值编码器处理
+2. **文本描述模态**：将流量特征转换为中文自然语言描述；A3 基线用 BERT 提取 768 维语义嵌入，含 LLM 变体用 Qwen2.5-1.5B 对真实文本做 mean pooling 得到 1536 维文本向量
+3. **融合投影层**：在 LLM **外部**将数值与文本特征拼接融合，投影到统一特征空间
+4. **LLM 文本编码器（非分类器）**：Qwen2.5-1.5B 冻结底座 + 可选 LoRA（A0\* 启用），仅负责把中文文本编码成向量，分类由后续分类头完成
+5. **闭集消融**：通过控制数值/文本/LLM/LoRA 的开关（6 变体），验证各组件对分类性能的贡献
+6. **开集检测 (OOD)**：基于类原型距离检测未知攻击样本，实现开集识别（研究中）
+7. **少样本学习**：在少量训练样本（k=5/10/20）下验证模型泛化能力
 
 模型架构参考 `原理图.png`，数据处理流程参考 `数据集处理流程图.png`。
