@@ -73,6 +73,10 @@ VARIANT_CONFIGS = {
     "A0_frozen": {"use_numeric": True,  "use_bert": False, "use_llm": True,  "fusion_type": "concat", "bert_trainable": False, "llm_use_lora": False},
     "A0*_no_num": {"use_numeric": False, "use_bert": False, "use_llm": True, "fusion_type": "concat", "bert_trainable": False, "llm_use_lora": True},
     "A0*_no_text": {"use_numeric": True, "use_bert": False, "use_llm": False, "fusion_type": "concat", "bert_trainable": False, "llm_use_lora": False},
+    # ── 融合策略消融（以 A0* 为主基线，仅换 fusion_type；A3_add 为可选补充）──
+    "A0*_add":    {"use_numeric": True,  "use_bert": False, "use_llm": True,  "fusion_type": "add",       "bert_trainable": False, "llm_use_lora": True},
+    "A0*_attn":   {"use_numeric": True,  "use_bert": False, "use_llm": True,  "fusion_type": "attention", "bert_trainable": False, "llm_use_lora": True},
+    "A3_add":     {"use_numeric": True,  "use_bert": True,  "use_llm": False, "fusion_type": "add",       "bert_trainable": False, "llm_use_lora": False},
     # 第三阶段改进消融（在A0基础上）
     "B0": {"use_focal_loss": False, "use_prototype_learning": False, "use_augmentation": False},
     "B1": {"use_focal_loss": True,  "use_prototype_learning": False, "use_augmentation": False},
@@ -93,6 +97,9 @@ VARIANT_DESCRIPTIONS = {
     "A0_frozen": "对照组：数值+LLM+全冻结（LLM做文本编码器但不微调）",
     "A0*_no_num": "对照组：仅 LLM+LoRA 纯文本",
     "A0*_no_text": "对照组：纯数值（有数值，无文本，无LLM）",
+    "A0*_add":   "融合消融：A0*主基线 + add融合（其余配置同A0*）",
+    "A0*_attn":  "融合消融：A0*主基线 + attention融合（其余配置同A0*，维度已修复保证兼容）",
+    "A3_add":    "融合消融：A3对照 + add融合（可选补充，无LLM，文本走BERT）",
     "B0": "基线模型（无第三阶段改进）",
     "B1": "仅Focal Loss",
     "B2": "仅原型对比学习",

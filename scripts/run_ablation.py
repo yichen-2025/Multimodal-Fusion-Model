@@ -2,6 +2,7 @@ import torch
 import sys
 import os
 import time
+import gc
 import argparse
 import csv
 import numpy as np
@@ -15,6 +16,27 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from scripts.train import train_model, VARIANT_CONFIGS, VARIANT_DESCRIPTIONS, get_next_model_id
 from scripts.test_model import test_model
+
+
+def _free_gpu(label=""):
+    """
+    强制释放 GPU 显存（Windows WDDM 模式下 empty_cache 不可靠，
+    必须先把模型显式 .to('cpu') 再 del，确保张量引用归零）。
+    
+    Args:
+        label (str): 调试标签，打印时显示释放了多少显存
+    """
+    if not torch.cuda.is_available():
+        return
+    before = torch.cuda.memory_reserved() / 1024 ** 2
+    torch.cuda.synchronize()
+    gc.collect()
+    torch.cuda.empty_cache()
+    after = torch.cuda.memory_reserved() / 1024 ** 2
+    freed = before - after
+    if abs(freed) > 1:  # 有实质变化才打印
+        tag = f"[{label}] " if label else ""
+        print(f"  {tag}显存 {before:.0f} → {after:.0f} MB (释放 {freed:.0f} MB)")
 
 
 def run_ablation(variants=None, 
@@ -60,15 +82,33 @@ def run_ablation(variants=None,
     print(f"  - 重复次数: {repeat}")
     print(f"  - 随机种子: {seed}")
     print(f"  - 输出文件: {output_csv}")
+    if torch.cuda.is_available():
+        total_mb = torch.cuda.get_device_properties(0).total_memory / 1024**2
+        print(f"  - GPU: {torch.cuda.get_device_name(0)} ({total_mb:.0f} MB)")
     print("=" * 80)
     
     all_results = []
+    prev_model = None  # 保存上一个变体的 model 引用用于释放
     
     for variant in variants:
         if variant not in VARIANT_CONFIGS:
             print(f"\n跳过未知变体: {variant}")
             continue
-        
+
+        # ── 释放上一个变体遗留的 GPU 显存 ──
+        # 关键修复（Windows WDDM 6GB 显存）：
+        # 旧代码：只 gc.collect()+empty_cache()，WDDM 下不可靠。
+        # 新代码：先显式 model.to('cpu') 把 LLM 权重搬离 GPU，
+        # 再 del + gc + empty_cache，确保碎片也被释放。
+        if prev_model is not None:
+            try:
+                prev_model.to('cpu')
+            except Exception:
+                pass
+            del prev_model
+            prev_model = None
+        _free_gpu(f"变体切换→{variant}")
+
         config = VARIANT_CONFIGS[variant]
         description = VARIANT_DESCRIPTIONS.get(variant, "未知")
         
@@ -101,6 +141,17 @@ def run_ablation(variants=None,
                 
                 print(f"\n训练完成: {train_duration:.1f}秒, 可训练参数: {trainable_params:,}")
                 
+                # ⚠️ 关键：在调 test_model 前，先把 train_model 返回的 model 的
+                # LLM 从 GPU 搬去 CPU！否则 test_model.from_pretrained() 又加载
+                # 一个新 LLM 到 GPU，两份 Qwen (~6GB) 会把 6GB 显卡挤爆 → 
+                # 触发 OOM fallback → 训练/测试速度骤降到 CPU 级别。
+                if torch.cuda.is_available():
+                    model.to('cpu')
+                    _free_gpu("训练后→测试前（释放训练模型 LLM）")
+                
+                # 保存引用，供变体切换时再次释放
+                prev_model = model
+                
                 # 2. 测试
                 print(f"\n[2/2] 开始测试...")
                 test_start = time.time()
@@ -114,6 +165,9 @@ def run_ablation(variants=None,
                     save_report=True
                 )
                 test_duration = time.time() - test_start
+                
+                # 测试完立即释放 test_model 内部加载的 LLM
+                _free_gpu("测试后（释放 test_model 内部 LLM）")
                 
                 # 3. 收集结果
                 result_row = {

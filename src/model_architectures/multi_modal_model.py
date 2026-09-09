@@ -201,10 +201,11 @@ class MultiModalFusionModel(nn.Module):
                 llm_dtype = torch.bfloat16
             else:
                 llm_dtype = torch.float32
+            # 注意：不使用 device_map="auto"，由 Trainer/外部统一管理设备分发，
+            # 避免在 PyTorch 2.12+ 下产生 meta tensor 导致 .to(device) 报错
             self.llm = AutoModelForCausalLM.from_pretrained(
                 llm_model_path,
                 torch_dtype=llm_dtype,
-                device_map="auto" if self.device.type == "cuda" else None,
                 local_files_only=True
             )
             self.hidden_size = self.llm.config.hidden_size
@@ -233,6 +234,10 @@ class MultiModalFusionModel(nn.Module):
                     print("警告: peft 未安装，跳过 LoRA。运行 pip install peft")
             else:
                 print("LLM 全冻结模式（不使用 LoRA）")
+            # 显式把 LLM 搬到 self.device，避免 CPU↔CUDA 设备不一致
+            # （去掉 device_map="auto" 后 from_pretrained 默认留在 CPU）
+            self.llm.to(self.device)
+            print(f"LLM 已加载到 {self.device}")
         else:
             self.llm = None
             self.hidden_size = 1536  # 无LLM时使用默认融合输出维度
@@ -777,6 +782,7 @@ class MultiModalFusionModel(nn.Module):
                 base_dtype = next(model.llm.parameters()).dtype
                 model.llm = PeftModel.from_pretrained(model.llm, lora_adapter_dir, is_trainable=False)
                 model._llm_is_peft = True
+                model.llm_use_lora = True  # 修复：加载 adapter 后同步标记，避免 get_config() 误报 False
                 print(f"LoRA adapter 已从 {lora_adapter_dir} 加载 (dtype={base_dtype})")
                 # 兜底：确保整个 PeftModel 保持与底座一致的 dtype
                 model.llm = model.llm.to(dtype=base_dtype)
