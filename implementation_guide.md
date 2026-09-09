@@ -22,7 +22,7 @@ flowchart TD
     J --> L[ood_train 训练OOD头]
     K --> L
     G --> L
-    L --> M[ood_eval 路由评估]
+    L --> M[ood_eval OOD评测]
     K --> M
     M --> N[experiment 一键全流程]
     N --> O[report 汇总报告]
@@ -63,7 +63,7 @@ python tools/download_qwen.py     # Qwen2.5-1.5B（~3GB）→ models/（已配 h
 ### 1.3 准备原始数据
 
 将 CSV 放进 `data_processing/`，需包含：
-- `Label` 列：`BENIGN` / `DDoS`（真实数据来自 CSE-CIC-IDS2018 Friday DDoS + UNSW-NB15）
+- `Label` 列：取值见 `processed_dataset/label_mapping.json`，为 **12 类**（BENIGN + 11 种攻击，如 DoS Hulk / DDoS / PortScan / Bot / Web Attack 等；真实数据来自 CSE-CIC-IDS2017 + UNSW-NB15）
 - 9 个特征列：`Destination Port`、`Bwd Packet Length Mean`、`Avg Bwd Segment Size`、`Bwd Packet Length Max`、`Bwd Packet Length Std`、`URG Flag Count`、`Packet Length Mean`、`Average Packet Size`、`Packet Length Std`
 
 ---
@@ -81,7 +81,7 @@ python main.py --run clean
 python main.py --run train
 
 # 在配置基础上用命令行覆盖参数
-python main.py --run train --dataset_id 3 --split_id 0 --variant A3
+python main.py --run train --dataset_id 0 --split_id 0 --variant A3
 ```
 
 **合法 `--run` 配置键一览**：
@@ -107,7 +107,7 @@ python main.py --run train --dataset_id 3 --split_id 0 --variant A3
 
 ## 3. Part 1：P0 闭集分类（从零到出结果）
 
-> 全程统一 `dataset_id` 与 `split_id`（下面以 `dataset_id=1`、`split_id=0` 为例，首次跑 `subset`/`split` 时 `dataset_id` 会自动分配并打印，请按实际值替换）。
+> 全程统一 `dataset_id` 与 `split_id`（本文档**假设得到的数据集为 `dataset_0`**，故下面统一以 `dataset_id=0`、`split_id=0` 为例；首次跑 `subset`/`split` 时 `dataset_id` 仍会自动分配并打印，请按实际值替换）。
 
 ### Step 1 — 数据清洗
 ```bash
@@ -118,23 +118,23 @@ python main.py --run clean
 
 ### Step 2 — 提取子集（选 9 特征 + 标准化）
 ```bash
-python main.py --run subset --dataset_id 3 --total_samples 5000
+python main.py --run subset --dataset_id 0 --total_samples 5000
 ```
 - 输出：`processed_dataset/dataset_3.csv` + `subset_3_scaled_features.npy` + `subset_3_labels.npy`
 
 ### Step 3 — 模态分离与划分（生成 BERT 嵌入）
 ```bash
-python main.py --run split --dataset_id 3
+python main.py --run split --dataset_id 0
 ```
 - 输出：`split_data/dataset_3/split_0/{train,val,test}.npz`（含 `scaled_features` / `text_embeddings` / `labels`）+ `train_data.csv`
 
 ### Step 4 — 训练模型
 ```bash
 # A3：无 LLM，纯 MLP，最快（约 42s），先跑它拿到 backbone
-python main.py --run train --dataset_id 3 --split_id 0 --variant A3
+python main.py --run train --dataset_id 0 --split_id 0 --variant A3
 
 # A0*：含冻结 Qwen + LoRA（文本编码器 + 领域适配），需 GPU（最慢）
-python main.py --run train --dataset_id 3 --split_id 0 --variant A0*
+python main.py --run train --dataset_id 0 --split_id 0 --variant A0*
 
 # 可选：A0（旧用法对照，LLM 全冻结无 LoRA）、A0_frozen（LoRA 对照）、A0*_no_num / A0*_no_text（模态贡献）
 ```
@@ -144,16 +144,16 @@ python main.py --run train --dataset_id 3 --split_id 0 --variant A0*
 
 ### Step 5 — 测试模型
 ```bash
-python main.py --run test --dataset_id 3 --split_id 0 --model_id <A3_id>
+python main.py --run test --dataset_id 0 --split_id 0 --model_id <A3_id>
 ```
 - 输出：`test_reports/report_<id>.json`（Accuracy / Precision / Recall / F1 + 混淆矩阵）
 
 ### Step 6 — 闭集消融实验（六变体）
 ```bash
 # 默认覆盖 A3 / A0* / A0_frozen（见 configs/run_configs.py 的 ablation 键）
-python main.py --run ablation --dataset_id 3 --split_id 0
+python main.py --run ablation --dataset_id 0 --split_id 0
 # 完整六变体（含 A0 / A0*_no_num / A0*_no_text）：
-python main.py --run ablation --dataset_id 3 --split_id 0 --variants "A3,A0,A0*,A0_frozen,A0*_no_num,A0*_no_text"
+python main.py --run ablation --dataset_id 0 --split_id 0 --variants "A3,A0,A0*,A0_frozen,A0*_no_num,A0*_no_text"
 ```
 - 输出：`ablation_results/ablation_results_<时间戳>.csv` + 对比图
 - **记录字段已修复**：每份报告现写入 `variant` 与 `llm_use_lora`，可区分 A0\*（开 LoRA）与 A0_frozen（关 LoRA）。
@@ -170,23 +170,23 @@ python main.py --run ablation --dataset_id 3 --split_id 0 --variants "A3,A0,A0*,
 
 ### Step P1.1 — 构造开集数据（留出类别→unknown）
 ```bash
-python main.py --run openset --dataset_id 3 --source_split_id 0 --unknown_ratio 0.3
+python main.py --run openset --dataset_id 0 --source_split_id 0 --unknown_ratio 0.3
 ```
 - 输出：`split_data/dataset_3/split_openset_0/`（train/val 不含未知，test 含 `unknown`）
 
 ### Step P1.2 — 构造少样本数据（每已知类 k 条）
 ```bash
-python main.py --run fewshot --dataset_id 3 --source_split_id 0 --k_per_class 5
-python main.py --run fewshot --dataset_id 3 --source_split_id 0 --k_per_class 10
-python main.py --run fewshot --dataset_id 3 --source_split_id 0 --k_per_class 20
+python main.py --run fewshot --dataset_id 0 --source_split_id 0 --k_per_class 5
+python main.py --run fewshot --dataset_id 0 --source_split_id 0 --k_per_class 10
+python main.py --run fewshot --dataset_id 0 --source_split_id 0 --k_per_class 20
 ```
 - 输出：`split_data/dataset_3/split_fewshot_<k>_0/`
 
 ### Step P1.3 — 训练 OOD 检测头（在各主干上各训一个）
 ```bash
-python main.py --run ood_train --model_id <A3_id>        --dataset_id 3 --split_id 0 --variant A3        --fewshot_k 5
-python main.py --run ood_train --model_id <A0*_id>       --dataset_id 3 --split_id 0 --variant A0*       --fewshot_k 5
-python main.py --run ood_train --model_id <A0_frozen_id> --dataset_id 3 --split_id 0 --variant A0_frozen --fewshot_k 5
+python main.py --run ood_train --model_id <A3_id>        --dataset_id 0 --split_id 0 --variant A3        --fewshot_k 5
+python main.py --run ood_train --model_id <A0*_id>       --dataset_id 0 --split_id 0 --variant A0*       --fewshot_k 5
+python main.py --run ood_train --model_id <A0_frozen_id> --dataset_id 0 --split_id 0 --variant A0_frozen --fewshot_k 5
 ```
 - 输出：`saved_ood_heads/ood_<id>/`（prototypes + threshold + config）
 - **记录 `ood_id`**。
@@ -196,17 +196,17 @@ python main.py --run ood_train --model_id <A0_frozen_id> --dataset_id 3 --split_
 python main.py --run ood_eval \
     --backbone_model_id <A0*_id> \
     --ood_id <ood_id> \
-    --dataset_id 3 --split_id 0 --fewshot_k 5
+    --dataset_id 0 --split_id 0 --fewshot_k 5
 ```
 - 输出：`ood_reports/ood_routing_<时间戳>.json`（Unknown F1 / AUROC / Macro-F1 / Recall，按主干对比 A3 / A0_frozen / A0\*）。
-- 注：原 `--llm_model_id` 生成式路由参数已废弃（BUG D），评测改为直接比较各主干 OOD 头。
+- 注：原 `ood_eval` 的「`--llm_model_id` 生成式路由」已废弃（BUG D），评测改为直接比较各主干 OOD 头；但 `experiment` 一键流程仍用 `--llm_model_id` 指定 A0\* 主干模型（下方命令中的 `--llm_model_id <A0*_id>` 合法且需要）。
 
 ### Step P1.5 — 一键完整实验（待脚本修复）
 ```bash
 python main.py --run experiment \
     --backbone_model_id <A3_id> \
     --llm_model_id <A0*_id> \
-    --dataset_id 3 --split_id 0 \
+    --dataset_id 0 --split_id 0 \
     --k_values "5,10,20,None"
 ```
 - 会自动：对每个 k 训 OOD 头 → 评测 → 生成汇总。
@@ -224,33 +224,33 @@ python main.py --run report
 ### 场景 A：从零跑通闭集
 ```bash
 python main.py --run clean
-python main.py --run subset --dataset_id 3
-python main.py --run split  --dataset_id 3
-python main.py --run train  --dataset_id 3 --split_id 0 --variant A3
-python main.py --run test   --dataset_id 3 --split_id 0 --model_id <A3_id>
+python main.py --run subset --dataset_id 0
+python main.py --run split  --dataset_id 0
+python main.py --run train  --dataset_id 0 --split_id 0 --variant A3
+python main.py --run test   --dataset_id 0 --split_id 0 --model_id <A3_id>
 ```
 
 ### 场景 B：完整消融
 ```bash
 python main.py --run clean
-python main.py --run subset --dataset_id 3
-python main.py --run split  --dataset_id 3
-python main.py --run ablation --dataset_id 3 --split_id 0 --variants "A3,A0,A0*,A0_frozen,A0*_no_num,A0*_no_text"
+python main.py --run subset --dataset_id 0
+python main.py --run split  --dataset_id 0
+python main.py --run ablation --dataset_id 0 --split_id 0 --variants "A3,A0,A0*,A0_frozen,A0*_no_num,A0*_no_text"
 ```
 
 ### 场景 C：已有模型，只跑开集评估（待 OOD 脚本修复）
 ```bash
 # 假设 model_9=A3, model_5=A0*
-python main.py --run openset --dataset_id 3
-python main.py --run fewshot --dataset_id 3 --k_per_class 5
-python main.py --run ood_train --model_id 9 --dataset_id 3 --split_id 0 --variant A3 --fewshot_k 5
-python main.py --run ood_eval --backbone_model_id 5 --ood_id <ood_id> --dataset_id 3 --split_id 0 --fewshot_k 5
+python main.py --run openset --dataset_id 0
+python main.py --run fewshot --dataset_id 0 --k_per_class 5
+python main.py --run ood_train --model_id 9 --dataset_id 0 --split_id 0 --variant A3 --fewshot_k 5
+python main.py --run ood_eval --backbone_model_id 5 --ood_id <ood_id> --dataset_id 0 --split_id 0 --fewshot_k 5
 python main.py --run report
 ```
 
 ### 场景 D：一键完整开集实验（待 OOD 脚本修复）
 ```bash
-python main.py --run experiment --backbone_model_id 9 --llm_model_id 5 --dataset_id 3 --split_id 0 --k_values "5,10,20,None"
+python main.py --run experiment --backbone_model_id 9 --llm_model_id 5 --dataset_id 0 --split_id 0 --k_values "5,10,20,None"
 ```
 
 ---
@@ -265,7 +265,7 @@ python main.py --run experiment --backbone_model_id 9 --llm_model_id 5 --dataset
 | `ablation_results/` | 消融对比结果 | Step 6 |
 | `saved_ood_heads/` | OOD 检测头 | P1.3 |
 | `test_reports/` | 模型测试报告 | Step 5 |
-| `ood_reports/` | OOD 路由评估报告 | P1.4 |
+| `ood_reports/` | OOD 评测报告 | P1.4 |
 | `logs/` | 各步骤运行日志 | 每步自动 |
 
 ---
@@ -275,7 +275,7 @@ python main.py --run experiment --backbone_model_id 9 --llm_model_id 5 --dataset
 1. **命令接口是 `--run`，不是 `--step`**。旧文档的 `python main.py --step clean` 会直接打印帮助并退出。
 2. **生成式路由已废弃**：原 `--llm_model_id` 参数（把 unknown 交 LLM 闭集 argmax 推理）因结构性缺陷已放弃；现 OOD 评测改为直接对比各主干的 OOD 头（A3 / A0_frozen / A0\*），不再需要该参数。
 3. **`model_id` 是占位符**：配置里写的 `model_id=9/15` 只是示例，请改用你自己训练后 `saved_models/` 下的真实目录名。
-4. **`dataset_id` / `split_id` 要全程一致**：建议固定 `dataset_id=1`、`split_id=0`；首次 `subset`/`split` 没指定时会自动分配，注意看终端打印的值。
+4. **`dataset_id` / `split_id` 要全程一致**：建议固定 `dataset_id=0`、`split_id=0`；首次 `subset`/`split` 没指定时会自动分配，注意看终端打印的值。
 5. **文档 ≠ 代码**：README.md / docs/theory.md 为旧架构；变体定义、OOD 头、路由逻辑以 `src/` 真实代码与 `docs/代码结构与数据流.md` 为准。
 
 ---

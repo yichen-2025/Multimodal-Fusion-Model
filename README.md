@@ -196,15 +196,15 @@ set HF_ENDPOINT=https://hf-mirror.com
 
 ### 3. 准备数据集
 
-> **数据集下载说明**：本项目实际使用的是 **CSE-CIC-IDS2018（Friday DDoS）** 与 **UNSW-NB15** 两个数据集，评估 BENIGN / DDoS 的开集多模态融合。数据集体积较大，请自行下载后放入 `data_processing/`：
+> **数据集下载说明**：本项目实际使用的是 **CSE-CIC-IDS2017** 与 **UNSW-NB15** 两个数据集，评估多分类（12 类）的开集多模态融合。数据集体积较大，请自行下载后放入 `data_processing/`：
 >
-> - CSE-CIC-IDS2018：https://www.unb.ca/cic/datasets/ids-2018.html
+> - CSE-CIC-IDS2017：https://www.unb.ca/cic/datasets/ids-2017.html
 > - UNSW-NB15：https://research.unsw.edu.au/projects/unsw-nb15-dataset
 >
 > 数据预处理（清洗 / 子集 / 模态分离）会自动完成格式统一，详见下方「运行项目」。
 
 将原始数据集（CSV格式）放入 `data_processing/` 目录，数据集需包含：
-- `Label` 列：值为 `BENIGN`（正常流量）或 `DDoS`（恶意流量）
+- `Label` 列：取值见 `processed_dataset/label_mapping.json`，为 **12 类**（BENIGN + 11 种攻击，如 DoS Hulk / DDoS / PortScan / Bot / Web Attack 等）
 - 特征列：`Destination Port`, `Bwd Packet Length Mean`, `Avg Bwd Segment Size`, `Bwd Packet Length Max`, `Bwd Packet Length Std`, `URG Flag Count`, `Packet Length Mean`, `Average Packet Size`, `Packet Length Std`
 
 ### 4. 运行项目
@@ -344,7 +344,7 @@ python main.py --run report
 
 | 主键 | 作用 | 示例 |
 |------|------|------|
-| `dataset_id` | 标识数据集子集 | `dataset_0.csv`, `dataset_1.csv` |
+| `dataset_id` | 标识数据集子集 | `dataset_0.csv`, `dataset_3.csv` |
 | `split_id` | 标识同一数据集的不同划分 | `split_data/dataset_0/split_0/` |
 | `model_id` | 标识不同的训练结果 | `saved_models/model_0/` |
 
@@ -358,7 +358,7 @@ python main.py --run report
 
 ### 数据格式
 
-- 原始数据集：CSV格式，包含`Label`列（值为`BENIGN`或`DDoS`）
+- 原始数据集：CSV格式，包含`Label`列（取值为 12 类，详见 `processed_dataset/label_mapping.json`）
 - 支持的特征列：`Destination Port`, `Bwd Packet Length Mean`, `Avg Bwd Segment Size`, `Bwd Packet Length Max`, `Bwd Packet Length Std`, `URG Flag Count`, `Packet Length Mean`, `Average Packet Size`, `Packet Length Std`
 
 ### 日志系统
