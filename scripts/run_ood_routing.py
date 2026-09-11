@@ -113,31 +113,34 @@ def evaluate_open_set(true_labels, pred_labels, num_known_classes=2):
                 results[f'class_{c}_recall'] = 0.0
                 results[f'class_{c}_unknown_rate'] = 0.0
 
-    # 未知类指标
+    # ✅ B4 修复：unknown_f1 改为全样本二分类口径（含 FP，不再只在 unknown 子集内算）
+    # 全样本二分类：unknown 当正类(1)，known 当负类(0)
+    all_binary_true = (true_labels >= num_known_classes).astype(int)
+    all_binary_pred = (pred_labels >= num_known_classes).astype(int)
+    results['unknown_precision'] = precision_score(all_binary_true, all_binary_pred, zero_division=0)
+    results['unknown_recall'] = recall_score(all_binary_true, all_binary_pred, zero_division=0)
+    results['unknown_f1'] = f1_score(all_binary_true, all_binary_pred, zero_division=0)
+    # known 被判为 unknown 的比例（FP 率，越低越好）
+    if known_mask.sum() > 0:
+        known_leak = np.mean(pred_labels[known_mask] >= num_known_classes)
+        results['known_leak_to_unknown'] = known_leak
+    else:
+        results['known_leak_to_unknown'] = 0.0
+
+    # 未知类子集中的细分指标（仅作补充分析，不影响主指标）
     if unknown_mask.sum() > 0:
-        unknown_true = true_labels[unknown_mask]
         unknown_pred = pred_labels[unknown_mask]
 
-        # 未知类检测率（被判为unknown的比例）
-        unknown_detected = unknown_pred >= num_known_classes
-        results['unknown_recall'] = np.mean(unknown_detected)
-
         # 未知类被判为known的比例（= 泄漏率）
+        unknown_detected = unknown_pred >= num_known_classes
         results['unknown_leak_rate'] = np.mean(~unknown_detected)
-
-        # 未知类F1（将unknown视为一个正类）
-        binary_true = (unknown_true >= num_known_classes).astype(int)
-        binary_pred = (unknown_pred >= num_known_classes).astype(int)
-        results['unknown_f1'] = f1_score(binary_true, binary_pred, zero_division=0)
 
         # 未知样本被错误分类为各已知类的比例
         for c in range(num_known_classes):
             leak_to_c = unknown_pred == c
             results[f'unknown_leak_to_{c}'] = np.mean(leak_to_c)
     else:
-        results['unknown_recall'] = 0.0
         results['unknown_leak_rate'] = 0.0
-        results['unknown_f1'] = 0.0
 
     # 三分类混淆矩阵
     all_labels = sorted(set(true_labels.tolist() + pred_labels.tolist()))
@@ -307,20 +310,28 @@ def run_ood_routing(
             print(f"    {LABEL_NAMES.get(lbl, str(lbl))}({lbl}): {cnt}")
 
     # ========== 5. 构造DataLoader ==========
-    backbone_configs = {
-        "A0": {"use_numeric": True,  "use_bert": True,  "use_llm": True},
-        "A1": {"use_numeric": True,  "use_bert": False, "use_llm": True},
-        "A2": {"use_numeric": False, "use_bert": True,  "use_llm": True},
-        "A3": {"use_numeric": True,  "use_bert": True,  "use_llm": False},
+    # 直接从已加载的 backbone 模型读取配置（最可信），补齐 A0* 系新变体
+    backbone_cfg = {
+        "use_numeric": backbone.use_numeric,
+        "use_bert": backbone.use_bert,
+        "use_llm": backbone.use_llm,
     }
-    backbone_cfg = backbone_configs.get(backbone_variant, backbone_configs["A3"])
+
+    # 获取 backbone 的 tokenizer（仅 use_llm=True 时有意义）
+    backbone_tokenizer = backbone.get_tokenizer() if backbone.use_llm else None
+
+    if verbose:
+        print(f"\n  Backbone 实际配置: use_numeric={backbone_cfg['use_numeric']}, "
+              f"use_bert={backbone_cfg['use_bert']}, use_llm={backbone_cfg['use_llm']}")
+        if backbone.use_llm:
+            print(f"  ✅ Tokenizer 已就绪，LLM 文本分支将被激活")
 
     dataloader = torch.utils.data.DataLoader(
         test_dataset, batch_size=batch_size, shuffle=False,
-        collate_fn=lambda b: collate_fn(b, tokenizer=None,
+        collate_fn=lambda b: collate_fn(b, tokenizer=backbone_tokenizer,
                                          use_numeric=backbone_cfg["use_numeric"],
                                          use_bert=backbone_cfg["use_bert"],
-                                         use_llm=False)
+                                         use_llm=backbone_cfg["use_llm"])
     )
 
     # ========== 6. OOD路由推理 ==========
@@ -351,10 +362,16 @@ def run_ood_routing(
         stat = batch["stat_tensor"]
         bert = batch["bert_tensor"]
         labels = batch["labels"]
+        input_ids = batch.get("input_ids", None)
+        attention_mask = batch.get("attention_mask", None)
 
-        # 提取融合特征
+        # 提取融合特征（✅ 关键修复：把 LLM 文本分支的 input_ids/attention_mask 传进去）
         with torch.no_grad():
-            features = backbone.extract_fusion_features(stat, bert)
+            features = backbone.extract_fusion_features(
+                stat, bert,
+                input_ids=input_ids,
+                attention_mask=attention_mask
+            )
 
         # OOD判定
         with torch.no_grad():
@@ -362,62 +379,41 @@ def run_ood_routing(
             ood_scores = ood_results['scores']
             unknown_mask = ood_results['unknown_mask']
 
-        # A3闭集预测（所有样本）
+        # 闭集预测（所有样本）
         with torch.no_grad():
-            outputs = backbone(stat, bert)
+            outputs = backbone(stat, bert, input_ids=input_ids, attention_mask=attention_mask)
             a3_logits = outputs["logits"]
             a3_pred = torch.argmax(a3_logits, dim=1)
 
         # 路由预测
         routed_pred = a3_pred.clone()
 
-        # 处理未知样本 → 路由到LLM或标记为unknown
+        # ✅ B3 修复：unknown 路径由 OOD 头直判，不再走 LLM 闭集重判
+        # 架构澄清（对应项目流程图）：
+        #   OOD 头 —— 是/否 unknown（门控）
+        #   MLP 分类头 —— 闭集已知类预测
+        #   CTI-RAG（Phase 3）—— 仅在 unknown 时生成解释文本，不参与判类
+        # 所以 OOD 头标记 unknown → 直接输出 num_known_classes 即可
         unknown_indices = torch.where(unknown_mask)[0]
         if len(unknown_indices) > 0:
-            if llm_model is not None:
-                # 收集未知样本的文本描述
-                unknown_texts = []
-                for idx in unknown_indices:
-                    sample = test_dataset[idx.item()]
-                    text = sample.get('text', '')
-                    if not text:
-                        text = "网络流量特征异常"
-                    unknown_texts.append(text)
+            for idx in unknown_indices:
+                routed_pred[idx] = num_known_classes
 
-                # 批量LLM推理
-                for i, (idx, text) in enumerate(zip(unknown_indices, unknown_texts)):
-                    sample_idx = idx.item()
-                    text = test_dataset[sample_idx].get('text', '') or "网络流量特征异常"
+                # 路由日志（后续加 CTI-RAG 时可在这后面追加解释字段）
+                routing_log.append({
+                    'sample_idx': idx.item(),
+                    'ood_score': ood_scores[idx].item(),
+                    'a3_pred_known_class': int(a3_pred[idx].item()),
+                    'routed_pred': num_known_classes,  # K = unknown label
+                    'ood_flagged': True,
+                    'true_label': int(labels[idx].item()),
+                    'cti_rag_explanation': None,  # Phase 3 填充
+                })
 
-                    # 构造prompt（多分类版本）
-                    prompt = f"判断以下网络流量类型。\n流量描述：{text}\n请选择：BENIGN、DoS Hulk、DoS GoldenEye、DoS slowloris、DoS Slowhttptest、DDoS、PortScan、FTP-Patator、SSH-Patator、Bot、Web Attack(Brute Force/XSS/Sql Injection)、Infiltration、Heartbleed。直接输出类别名。"
-
-                    # LLM推理
-                    llm_result = llm_model.predict(
-                        stat_vector=stat[sample_idx],
-                        bert_embedding=bert[sample_idx],
-                        tokenizer=llm_tokenizer,
-                        text_prompt=prompt
-                    )
-                    # llm_result: 0..K-1=已知类, K=unknown
-                    routed_pred[idx] = llm_result
-
-                    routing_log.append({
-                        'sample_idx': sample_idx,
-                        'ood_score': ood_scores[idx].item(),
-                        'a3_pred': int(a3_pred[idx].item()),
-                        'routed_pred': int(llm_result),
-                        'ood_flagged': True,
-                        'true_label': int(labels[idx].item())
-                    })
-            else:
-                # 无LLM：直接标记为未知类
-                for idx in unknown_indices:
-                    routed_pred[idx] = num_known_classes
-
+        # .float() 防 bf16：numpy 不支持 BFloat16 类型
         all_a3_preds.extend(a3_pred.cpu().numpy().tolist())
         all_routed_preds.extend(routed_pred.cpu().numpy().tolist())
-        all_ood_scores.extend(ood_scores.cpu().numpy().tolist())
+        all_ood_scores.extend(ood_scores.cpu().float().numpy().tolist())
         all_unknown_flags.extend(unknown_mask.cpu().numpy().tolist())
         all_labels_collected.extend(labels.cpu().numpy().tolist())
 
@@ -595,8 +591,14 @@ if __name__ == "__main__":
                         help="A3 backbone模型ID")
     parser.add_argument("--ood_id", type=int, required=True,
                         help="已训练OOD头ID")
-    parser.add_argument("--llm_model_id", type=int, default=None,
-                        help="A0 LLM模型ID（可选）")
+    # 允许用户传 "None" / "none" / 空字符串 来明确跳过
+    def _optional_int(s):
+        if s is None or s.strip().lower() in ('none', '', 'null'):
+            return None
+        return int(s)
+
+    parser.add_argument("--llm_model_id", type=_optional_int, default=None,
+                        help="A0 LLM模型ID（可选，不写或写 None 即跳过）")
     parser.add_argument("--dataset_id", type=int, default=1,
                         help="数据集ID（默认1）")
     parser.add_argument("--split_id", type=int, default=0,

@@ -156,27 +156,46 @@ def train_ood_head(
     print("\n" + "-" * 40)
     print("提取融合特征...")
 
+    # 从模型获取 tokenizer（✅ B2 修复：use_llm=True 时必须有 tokenizer 来编码文本）
+    model_tokenizer = model.get_tokenizer() if model.use_llm else None
+    # 用模型的实际配置覆盖 variant_configs（最可信的真相源）
+    actual_use_numeric = model.use_numeric
+    actual_use_bert = model.use_bert
+    actual_use_llm = model.use_llm
+    print(f"  模型实际配置: use_numeric={actual_use_numeric}, "
+          f"use_bert={actual_use_bert}, use_llm={actual_use_llm}")
+    if actual_use_llm:
+        print(f"  ✅ Tokenizer 已就绪，LLM 文本分支将被激活")
+
     def extract_features(dataset, desc=""):
         features_list = []
         labels_list = []
 
         dataloader = torch.utils.data.DataLoader(
             dataset, batch_size=batch_size, shuffle=False,
-            collate_fn=lambda b: collate_fn(b, tokenizer=None,
-                                             use_numeric=use_numeric,
-                                             use_bert=use_bert,
-                                             use_llm=False)
+            collate_fn=lambda b: collate_fn(b, tokenizer=model_tokenizer,
+                                             use_numeric=actual_use_numeric,
+                                             use_bert=actual_use_bert,
+                                             use_llm=actual_use_llm)
         )
 
         for batch in dataloader:
             stat = batch["stat_tensor"]
             bert = batch["bert_tensor"]
             labels = batch["labels"]
+            input_ids = batch.get("input_ids", None)
+            attention_mask = batch.get("attention_mask", None)
 
+            # ✅ B2 修复：传入 input_ids/attention_mask，让 LLM 编码器吃到真实文本
             with torch.no_grad():
-                feats = model.extract_fusion_features(stat, bert)
+                feats = model.extract_fusion_features(
+                    stat, bert,
+                    input_ids=input_ids,
+                    attention_mask=attention_mask
+                )
 
-            features_list.append(feats.cpu().numpy())
+            # bf16 tensor 必须先 cast 成 float32 才能转 numpy（numpy 不支持 BFloat16）
+            features_list.append(feats.cpu().float().numpy())
             labels_list.append(labels.numpy())
 
             progress = len(features_list)

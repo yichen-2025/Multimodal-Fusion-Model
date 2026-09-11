@@ -756,6 +756,9 @@ def train_model(model_path=None,
         f.write(f"use_llm: {use_llm}\n")
         f.write(f"fusion_type: {fusion_type}\n")
         f.write(f"bert_trainable: {bert_trainable}\n")
+        f.write(f"llm_use_lora: {llm_use_lora}\n")
+        f.write(f"lora_r: {lora_r}\n")
+        f.write(f"lora_alpha: {lora_alpha}\n")
         f.write(f"num_classes: {num_classes}\n")
         f.write(f"per_device_train_batch_size: {per_device_train_batch_size}\n")
         f.write(f"gradient_accumulation_steps: {gradient_accumulation_steps}\n")
@@ -796,6 +799,9 @@ def train_model(model_path=None,
         'use_llm': use_llm,
         'fusion_type': fusion_type,
         'bert_trainable': bert_trainable,
+        'llm_use_lora': llm_use_lora,
+        'lora_r': lora_r,
+        'lora_alpha': lora_alpha,
         'num_classes': num_classes,
         'learning_rate': learning_rate,
         'epochs': num_train_epochs,

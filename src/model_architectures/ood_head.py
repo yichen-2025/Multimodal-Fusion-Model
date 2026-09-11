@@ -78,6 +78,11 @@ class OODHead(nn.Module):
         """
         batch_size = features.shape[0]
 
+        # 自动对齐 dtype（bf16 骨干 → float32 OOD 头）
+        # 原型向量始终是 float32，输入特征可能是 bf16（混合精度训练/推理）
+        if features.dtype != self.prototypes.dtype:
+            features = features.to(dtype=self.prototypes.dtype)
+
         # 计算距离矩阵 [batch_size, num_known_classes]
         distances = self._compute_distances(features)
 
