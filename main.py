@@ -56,6 +56,13 @@ def create_necessary_directories():
             print(f"  - {d}")
 
 
+# 已知需要解析为列表的命令行参数（函数签名中默认是 None/空列表，无法自动推断）
+LIST_PARAM_HINTS = {
+    "hold_out_classes": int,
+    "k_values": int,
+    "variants": str,
+}
+
 STEP_CONFIGS = [
     {
         "id": "clean",
@@ -224,7 +231,12 @@ def _parse_override_args(remaining_args, func_params, cfg_params=None):
         default = info["default"]
         arg_type = _infer_arg_type(name, default, cfg_params)
 
-        if arg_type == "bool":
+        if name in LIST_PARAM_HINTS:
+            # 列表参数：接受 0~n 个值，例如 --hold_out_classes 10 11
+            extra_parser.add_argument(
+                f"--{name}", nargs='*', type=LIST_PARAM_HINTS[name], default=None
+            )
+        elif arg_type == "bool":
             extra_parser.add_argument(f"--{name}", action="store_true", default=None, dest=name)
             extra_parser.add_argument(f"--no-{name}", action="store_false", dest=name, default=None)
         elif arg_type == "int":

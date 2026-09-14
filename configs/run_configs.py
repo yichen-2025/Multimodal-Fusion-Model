@@ -299,7 +299,7 @@ RUN_CONFIG = {
             "dataset_id": 0,
             "source_split_id": 0,
             "output_split_id": None,
-            "unknown_ratio": 0.3,
+            "simulated_unknown_ratio": 0.3,
             "random_state": 42,
             "hold_out_classes": None
         }

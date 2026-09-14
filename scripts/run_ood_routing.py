@@ -65,102 +65,10 @@ def load_ood_head(ood_id):
     return ood_head, config
 
 
-def evaluate_open_set(true_labels, pred_labels, num_known_classes=2):
-    """
-    开集三分类评估
+from utils.open_set_eval import evaluate_open_set  # B8：统一评估口径
 
-    Args:
-        true_labels: 真实标签 (0=benign, 1=known DDoS, 2=unknown DDoS)
-        pred_labels: 预测标签 (0, 1, 2)
-        num_known_classes: 已知类数量
-
-    Returns:
-        dict: 评估指标
-    """
-    results = {}
-
-    # 整体准确率
-    results['accuracy'] = accuracy_score(true_labels, pred_labels)
-
-    # 宏平均F1（三分类）
-    results['macro_f1'] = f1_score(true_labels, pred_labels, average='macro', zero_division=0)
-
-    # 已知类指标
-    known_mask = true_labels < num_known_classes
-    unknown_mask = true_labels >= num_known_classes
-
-    # 已知类：二分类（benign vs known_DDoS）
-    if known_mask.sum() > 0:
-        known_true = true_labels[known_mask]
-        known_pred = pred_labels[known_mask]
-
-        # 已知类内部：将误判为unknown的视为错误
-        known_correct = known_pred < num_known_classes
-        results['known_accuracy'] = np.mean(known_correct)
-
-        # 已知类内分类正确（不只是被判为known）
-        results['known_inner_accuracy'] = accuracy_score(known_true[known_correct], known_pred[known_correct]) if known_correct.sum() > 0 else 0.0
-
-        # 每类已知的召回率
-        for c in range(num_known_classes):
-            class_mask = known_true == c
-            if class_mask.sum() > 0:
-                class_pred_correct = known_pred[class_mask] == c
-                class_pred_as_unknown = known_pred[class_mask] >= num_known_classes
-                results[f'class_{c}_recall'] = np.mean(class_pred_correct)
-                results[f'class_{c}_unknown_rate'] = np.mean(class_pred_as_unknown)
-            else:
-                results[f'class_{c}_recall'] = 0.0
-                results[f'class_{c}_unknown_rate'] = 0.0
-
-    # ✅ B4 修复：unknown_f1 改为全样本二分类口径（含 FP，不再只在 unknown 子集内算）
-    # 全样本二分类：unknown 当正类(1)，known 当负类(0)
-    all_binary_true = (true_labels >= num_known_classes).astype(int)
-    all_binary_pred = (pred_labels >= num_known_classes).astype(int)
-    results['unknown_precision'] = precision_score(all_binary_true, all_binary_pred, zero_division=0)
-    results['unknown_recall'] = recall_score(all_binary_true, all_binary_pred, zero_division=0)
-    results['unknown_f1'] = f1_score(all_binary_true, all_binary_pred, zero_division=0)
-    # known 被判为 unknown 的比例（FP 率，越低越好）
-    if known_mask.sum() > 0:
-        known_leak = np.mean(pred_labels[known_mask] >= num_known_classes)
-        results['known_leak_to_unknown'] = known_leak
-    else:
-        results['known_leak_to_unknown'] = 0.0
-
-    # 未知类子集中的细分指标（仅作补充分析，不影响主指标）
-    if unknown_mask.sum() > 0:
-        unknown_pred = pred_labels[unknown_mask]
-
-        # 未知类被判为known的比例（= 泄漏率）
-        unknown_detected = unknown_pred >= num_known_classes
-        results['unknown_leak_rate'] = np.mean(~unknown_detected)
-
-        # 未知样本被错误分类为各已知类的比例
-        for c in range(num_known_classes):
-            leak_to_c = unknown_pred == c
-            results[f'unknown_leak_to_{c}'] = np.mean(leak_to_c)
-    else:
-        results['unknown_leak_rate'] = 0.0
-
-    # 三分类混淆矩阵
-    all_labels = sorted(set(true_labels.tolist() + pred_labels.tolist()))
-    cm = confusion_matrix(true_labels, pred_labels, labels=all_labels)
-    results['confusion_matrix'] = cm.tolist()
-    results['confusion_labels'] = [LABEL_NAMES.get(l, str(l)) for l in all_labels]
-
-    # 分类报告
-    target_names = [LABEL_NAMES.get(l, str(l)) for l in sorted(set(true_labels.tolist() + pred_labels.tolist()))]
-    results['classification_report'] = classification_report(
-        true_labels, pred_labels, target_names=target_names,
-        zero_division=0, output_dict=True
-    )
-
-    # 路由统计
-    results['total'] = len(true_labels)
-    results['num_known_routed'] = int(np.sum(pred_labels < num_known_classes))
-    results['num_unknown_routed'] = int(np.sum(pred_labels >= num_known_classes))
-
-    return results
+# run_ood_routing.py 本地旧 evaluate_open_set 函数已迁移到 utils/open_set_eval.py
+# （B8 修复：消除双份实现）
 
 
 def run_ood_routing(
@@ -460,7 +368,8 @@ def run_ood_routing(
 
     # OOD路由评估（开集）
     routed_results = evaluate_open_set(
-        true_labels_arr, routed_pred_arr, num_known_classes
+        true_labels_arr, routed_pred_arr, num_known_classes,
+        label_names=LABEL_NAMES  # B8：传自定义标签名（含 "unknown" 条目）
     )
 
     if verbose:

@@ -90,10 +90,16 @@ def train_ood_head(
     print("=" * 60)
 
     variant_configs = {
+        # 基础模态消融（路线 A）
         "A0": {"use_numeric": True,  "use_bert": True,  "use_llm": True},
         "A1": {"use_numeric": True,  "use_bert": False, "use_llm": True},
         "A2": {"use_numeric": False, "use_bert": True,  "use_llm": True},
         "A3": {"use_numeric": True,  "use_bert": True,  "use_llm": False},
+        # 路线 B 新变体（LLM 做文本编码器）
+        "A0*":         {"use_numeric": True,  "use_bert": False, "use_llm": True},
+        "A0_frozen":   {"use_numeric": True,  "use_bert": False, "use_llm": True},
+        "A0*_no_num":  {"use_numeric": False, "use_bert": False, "use_llm": True},
+        "A0*_no_text": {"use_numeric": True,  "use_bert": False, "use_llm": False},
     }
 
     config = variant_configs.get(variant, variant_configs["A3"])

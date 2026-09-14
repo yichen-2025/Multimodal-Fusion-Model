@@ -16,6 +16,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from transformers import AutoTokenizer
 from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.data.data_loader import load_real_data, generate_mock_data, load_split_data
+from utils.open_set_eval import evaluate_open_set  # B8：统一评估口径
 
 REPORTS_DIR = os.path.join(PROJECT_ROOT, "test_reports")
 INDEX_FILE = os.path.join(REPORTS_DIR, "reports_index.csv")
@@ -413,49 +414,13 @@ def evaluate_open_set_model(model, dataset, tokenizer=None, device=None, num_kno
     true_arr = np.array(all_labels)
     pred_arr = np.array(all_preds)
 
-    results = {}
-    results['accuracy'] = accuracy_score(true_arr, pred_arr)
-    results['macro_f1'] = f1_score(true_arr, pred_arr, average='macro', zero_division=0)
-
-    known_mask = true_arr < num_known_classes
-    unknown_mask = true_arr >= num_known_classes
-
-    if known_mask.sum() > 0:
-        results['known_accuracy'] = accuracy_score(true_arr[known_mask], pred_arr[known_mask])
-        for c in range(num_known_classes):
-            cmask = true_arr == c
-            if cmask.sum() > 0:
-                results[f'class_{c}_recall'] = np.mean(pred_arr[cmask] == c)
-            else:
-                results[f'class_{c}_recall'] = 0.0
-
-    if unknown_mask.sum() > 0:
-        results['unknown_recall'] = np.mean(pred_arr[unknown_mask] >= num_known_classes)
-        results['unknown_leak_rate'] = np.mean(pred_arr[unknown_mask] < num_known_classes)
-        results['unknown_f1'] = f1_score(
-            (true_arr >= num_known_classes).astype(int),
-            (pred_arr >= num_known_classes).astype(int),
-            zero_division=0
-        )
-    else:
-        results['unknown_recall'] = 0.0
-        results['unknown_leak_rate'] = 0.0
-        results['unknown_f1'] = 0.0
-
-    results['confusion_matrix'] = confusion_matrix(true_arr, pred_arr).tolist()
-    all_present = sorted(set(true_arr.tolist() + pred_arr.tolist()))
-    label_names = {
-        0: "BENIGN", 1: "DoS Hulk", 2: "DoS GoldenEye", 3: "DoS slowloris",
-        4: "DoS Slowhttptest", 5: "DDoS", 6: "PortScan", 7: "FTP-Patator",
-        8: "SSH-Patator", 9: "Bot", 10: "Web Attack - Brute Force",
-        11: "Web Attack - XSS", 12: "Web Attack - Sql Injection",
-        13: "Infiltration", 14: "Heartbleed"
-    }
-    target_names = [label_names.get(l, f"class_{l}") for l in all_present]
-    results['classification_report'] = classification_report(
-        true_arr, pred_arr, target_names=target_names,
-        zero_division=0, output_dict=True
+    # B8：评估逻辑已抽到 utils.open_set_eval，这里统一调用
+    results = evaluate_open_set(
+        true_arr, pred_arr, num_known_classes,
+        include_routing_stats=False  # test_model 不需要路由统计字段
     )
+
+    # 保留模型原始输出供下游分析
     results['predictions'] = all_preds
     results['labels'] = all_labels
 
