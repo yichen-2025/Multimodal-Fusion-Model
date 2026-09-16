@@ -17,6 +17,10 @@ from src.data.data_loader import load_split_data, collate_fn
 from utils.log_utils import save_log
 from config.label_config import MERGED_LABEL_NAMES
 
+# P0-1: 固定种子，确保 eval 可复现
+torch.manual_seed(42)
+np.random.seed(42)
+
 
 def get_next_ood_id(base_dir=None):
     if base_dir is None:

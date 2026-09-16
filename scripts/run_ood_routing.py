@@ -22,6 +22,10 @@ from src.model_architectures.ood_head import OODHead
 from src.data.data_loader import load_split_data, collate_fn
 from utils.log_utils import save_log
 
+# P0-1: 固定种子，确保 eval 可复现（ood_head 已去扰动）
+torch.manual_seed(42)
+np.random.seed(42)
+
 
 LABEL_NAMES = {
     0: "BENIGN",
@@ -69,6 +73,23 @@ from utils.open_set_eval import evaluate_open_set  # B8：统一评估口径
 
 # run_ood_routing.py 本地旧 evaluate_open_set 函数已迁移到 utils/open_set_eval.py
 # （B8 修复：消除双份实现）
+
+
+def _compute_auroc(y_true, y_score):
+    """P0-3: 纯 NumPy 实现 AUROC（无 sklearn 依赖）
+
+    秩次公式：对所有 pos-neg 样本对，统计 pos_score > neg_score + 0.5 * equal
+    """
+    y_true = np.array(y_true, dtype=int)
+    y_score = np.array(y_score, dtype=float)
+    pos = y_score[y_true == 1]
+    neg = y_score[y_true == 0]
+    n_pos, n_neg = len(pos), len(neg)
+    if n_pos == 0 or n_neg == 0:
+        return float('nan')
+    pair_gt = np.sum(pos[:, None] > neg[None, :])
+    pair_eq = np.sum(pos[:, None] == neg[None, :])
+    return float((pair_gt + 0.5 * pair_eq) / (n_pos * n_neg))
 
 
 def run_ood_routing(
@@ -344,6 +365,11 @@ def run_ood_routing(
     a3_pred_arr = np.array(all_a3_preds)
     routed_pred_arr = np.array(all_routed_preds)
 
+    # P0-3: AUROC 计算（阈值无关主指标）
+    # OOD head 分数：越大越可能是 unknown
+    y_true_ood = (true_labels_arr >= num_known_classes).astype(int)  # 1=unknown, 0=known
+    auroc_ood = _compute_auroc(y_true_ood, np.array(all_ood_scores))
+
     # A3基线评估（闭集：只看已知类）
     if compare_baseline:
         known_mask = true_labels_arr < num_known_classes
@@ -372,6 +398,15 @@ def run_ood_routing(
         label_names=LABEL_NAMES  # B8：传自定义标签名（含 "unknown" 条目）
     )
 
+    # P0-3: 一致性断言（文档 §5 验收标准）
+    n_unknown_routed = int(np.sum(routed_pred_arr == num_known_classes))
+    n_routing_log = len(routing_log)
+    if n_unknown_routed != n_routing_log:
+        print(f"  ⚠️ 一致性警告: routed_pred 中 unknown={n_unknown_routed} 但 routing_log={n_routing_log}")
+    else:
+        if verbose:
+            print(f"  ✅ 一致性通过: routing_log({n_routing_log}) == routed_pred unknown({n_unknown_routed})")
+
     if verbose:
         print(f"\n--- A3闭集基线 ---")
         print(f"  已知类准确率: {a3_known_acc:.4f}")
@@ -379,11 +414,14 @@ def run_ood_routing(
         print(f"  未知样本泄漏率: {a3_unknown_leak:.4f} (全部被判为known)")
 
         print(f"\n--- OOD路由 (开集) ---")
+        # P0-3: AUROC 作为首报主指标
+        print(f"  ★ AUROC (主指标, 阈值无关): {auroc_ood:.4f}")
+        print(f"  未知类F1: {routed_results['unknown_f1']:.4f}")
+        print(f"  未知类召回率: {routed_results['unknown_recall']:.4f}")
+        print(f"  未知类泄漏率: {routed_results['unknown_leak_rate']:.4f}")
+        print(f"  已知类准确率: {routed_results.get('known_accuracy', 0):.4f}")
         print(f"  整体准确率: {routed_results['accuracy']:.4f}")
         print(f"  Macro-F1: {routed_results['macro_f1']:.4f}")
-        print(f"  未知类召回率: {routed_results['unknown_recall']:.4f}")
-        print(f"  未知类F1: {routed_results['unknown_f1']:.4f}")
-        print(f"  未知类泄漏率: {routed_results['unknown_leak_rate']:.4f}")
 
         print(f"\n  --- 各类表现 ---")
         for c in range(num_known_classes):
@@ -391,7 +429,7 @@ def run_ood_routing(
             unk_rate = routed_results.get(f'class_{c}_unknown_rate', 0)
             print(f"    {LABEL_NAMES.get(c, str(c))}({c}): 召回={recall:.4f}, 误判为unknown={unk_rate:.4f}")
         if 'unknown_recall' in routed_results:
-            print(f"    {LABEL_NAMES.get(2, 'unknown')}(2): 召回={routed_results['unknown_recall']:.4f}")
+            print(f"    unknown: 召回={routed_results['unknown_recall']:.4f}")
 
     duration_seconds = time.time() - start_time
 
@@ -415,6 +453,7 @@ def run_ood_routing(
         'llm_variant': llm_variant,
         'total_test': len(all_labels_collected),
         'routed': {
+            'auroc': auroc_ood,  # P0-3: 主指标
             'accuracy': routed_results['accuracy'],
             'macro_f1': routed_results['macro_f1'],
             'unknown_recall': routed_results['unknown_recall'],
@@ -465,9 +504,11 @@ def run_ood_routing(
         'ood_id': ood_id,
         'llm_model_id': llm_model_id,
         'total_test': len(all_labels_collected),
-        'macro_f1': routed_results['macro_f1'],
+        'auroc': auroc_ood,  # P0-3: 主指标
         'unknown_f1': routed_results['unknown_f1'],
         'unknown_recall': routed_results['unknown_recall'],
+        'unknown_leak_rate': routed_results['unknown_leak_rate'],
+        'macro_f1': routed_results['macro_f1'],
         'duration_seconds': round(duration_seconds, 3)
     }
 
@@ -484,6 +525,7 @@ def run_ood_routing(
         print("=" * 60)
 
     return {
+        'auroc': auroc_ood,  # P0-3: 主指标
         'routed_results': routed_results,
         'a3_baseline': {
             'known_accuracy': a3_known_acc if compare_baseline else None,

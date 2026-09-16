@@ -225,9 +225,21 @@ def make_openset_split(dataset_id=0,
     train_keep_mask = np.isin(train_labels, known_classes)
     train_keep_idx = np.where(train_keep_mask)[0]
 
-    # 验证集：同训练集
+    # 验证集：known 样本 + 少量 hold-out 样本(标签→unknown_label) 用于阈值校准
     val_keep_mask = np.isin(val_labels, known_classes)
     val_keep_idx = np.where(val_keep_mask)[0]
+
+    # 从源 val 的 hold-out 样本中抽 ~20 个保留在新 val（作为真实 unknown）
+    # 剩余的源 val hold-out → 移到 test 作为额外 OOD 样本
+    val_holdout_idx_all = np.where(np.isin(val_labels, hold_out_classes))[0]
+    n_val_unknown = min(20, len(val_holdout_idx_all))
+    if n_val_unknown > 0:
+        rng_val = np.random.RandomState(random_state + 1)  # 独立种子
+        val_unknown_idx = rng_val.choice(val_holdout_idx_all, size=n_val_unknown, replace=False)
+        val_holdout_to_test = np.setdiff1d(val_holdout_idx_all, val_unknown_idx)
+    else:
+        val_unknown_idx = np.array([], dtype=int)
+        val_holdout_to_test = np.array([], dtype=int)
 
     # 测试集 known 部分（known_classes 的原始标签保留）
     test_known_mask = np.isin(test_labels, known_classes)
@@ -239,6 +251,8 @@ def make_openset_split(dataset_id=0,
 
     print(f"  - train known: {len(train_keep_idx)}")
     print(f"  - val known:   {len(val_keep_idx)}")
+    print(f"  - val unknown (hold-out 移入, 标签→{unknown_label}): {len(val_unknown_idx)}")
+    print(f"  - val holdout→test (额外 OOD): {len(val_holdout_to_test)}")
     print(f"  - test known (原始): {len(test_known_idx)}")
     print(f"  - test hold-out (真实OOD, 标签→{unknown_label}): {len(test_holdout_idx)}")
 
@@ -282,6 +296,16 @@ def make_openset_split(dataset_id=0,
     new_val_bert = val_npz['text_embeddings'][val_keep_idx]
     new_val_labels = val_labels[val_keep_idx].copy()
 
+    # val unknown 部分（hold-out 移入，标签→unknown_label）
+    if len(val_unknown_idx) > 0:
+        val_unknown_stat = val_npz['scaled_features'][val_unknown_idx]
+        val_unknown_bert = val_npz['text_embeddings'][val_unknown_idx]
+        val_unknown_labels = np.full(len(val_unknown_idx), unknown_label, dtype=np.int64)
+
+        new_val_stat = np.concatenate([new_val_stat, val_unknown_stat])
+        new_val_bert = np.concatenate([new_val_bert, val_unknown_bert])
+        new_val_labels = np.concatenate([new_val_labels, val_unknown_labels])
+
     # 测试集：三部分拼接
     # (a) test known keep — 保留原标签
     test_known_keep_stat = test_npz['scaled_features'][test_known_idx[test_known_keep_idx]]
@@ -298,7 +322,17 @@ def make_openset_split(dataset_id=0,
     holdout_bert = test_npz['text_embeddings'][test_holdout_idx]
     holdout_labels = np.full(len(test_holdout_idx), unknown_label, dtype=np.int64)
 
+    # (d) 源 val hold-out 剩余部分 → 移入 test 作为额外 OOD
+    val_holdout_extra_stat = val_npz['scaled_features'][val_holdout_to_test] if len(val_holdout_to_test) > 0 else np.empty((0, holdout_stat.shape[1] if holdout_stat.ndim > 1 else 0))
+    val_holdout_extra_bert = val_npz['text_embeddings'][val_holdout_to_test] if len(val_holdout_to_test) > 0 else np.empty((0, holdout_bert.shape[1] if holdout_bert.ndim > 1 else 0))
+    val_holdout_extra_labels = np.full(len(val_holdout_to_test), unknown_label, dtype=np.int64)
+
     new_test_stat = np.concatenate([
+        test_known_keep_stat,
+        test_sim_stat,
+        holdout_stat,
+        val_holdout_extra_stat,
+    ]) if len(val_holdout_extra_stat) > 0 else np.concatenate([
         test_known_keep_stat,
         test_sim_stat,
         holdout_stat,
@@ -307,11 +341,17 @@ def make_openset_split(dataset_id=0,
         test_known_keep_bert,
         test_sim_bert,
         holdout_bert,
+        val_holdout_extra_bert,
+    ]) if len(val_holdout_extra_bert) > 0 else np.concatenate([
+        test_known_keep_bert,
+        test_sim_bert,
+        holdout_bert,
     ])
     new_test_labels = np.concatenate([
         test_known_keep_labels,
         test_sim_labels,
         holdout_labels,
+        val_holdout_extra_labels,
     ])
 
     # 打印新划分的统计
@@ -338,12 +378,13 @@ def make_openset_split(dataset_id=0,
             src = "hold-out(OOD)+simulated={}+{}".format(n_ho, n_sim)
         print(f"    {lbl}: {name} = {cnt}  ({src})")
 
-    # sanity check: 训练/验证集不应出现 hold_out 标签
+    # sanity check: 训练集不应出现 hold_out 标签
     assert len(np.intersect1d(new_train_labels, hold_out_classes)) == 0, \
         "训练集不应包含 hold_out_classes！"
-    assert len(np.intersect1d(new_val_labels, hold_out_classes)) == 0, \
-        "验证集不应包含 hold_out_classes！"
-    print("\n  ✅ sanity check 通过：train/val 不含 hold-out 类")
+    # 验证集：所有标签应为 known (0..unknown_label-1) 或 unknown_label
+    assert np.all((new_val_labels < unknown_label) | (new_val_labels == unknown_label)), \
+        "验证集标签异常：应只有 known 或 unknown_label"
+    print(f"\n  ✅ sanity check 通过：train 不含 hold-out 类，val 含 {int(np.sum(new_val_labels == unknown_label))} 个 unknown 样本")
 
     # ========== 6. 构造 CSV 文本描述 ==========
     print("\n" + "-" * 40)
@@ -357,7 +398,23 @@ def make_openset_split(dataset_id=0,
         return rows
 
     new_train_csv = gather_csv_rows(train_csv, train_keep_idx, new_train_labels)
-    new_val_csv = gather_csv_rows(val_csv, val_keep_idx, new_val_labels)
+
+    # val CSV: known + unknown 两部分合并
+    if val_csv is not None:
+        val_known_csv = val_csv.iloc[val_keep_idx].copy()
+        val_known_csv['Label'] = val_labels[val_keep_idx]
+        if len(val_unknown_idx) > 0:
+            val_unknown_csv = val_csv.iloc[val_unknown_idx].copy()
+            val_unknown_csv['Label'] = unknown_label
+            if 'text_description' in val_unknown_csv.columns:
+                val_unknown_csv['text_description'] = val_unknown_csv['text_description'].apply(
+                    lambda x: f"[未知-留出类] {x}" if pd.notna(x) else "[未知-留出类]"
+                )
+            new_val_csv = pd.concat([val_known_csv, val_unknown_csv], ignore_index=True)
+        else:
+            new_val_csv = val_known_csv
+    else:
+        new_val_csv = None
 
     if test_csv is not None:
         # (a) known keep 部分
@@ -380,7 +437,17 @@ def make_openset_split(dataset_id=0,
                 lambda x: f"[未知-留出类] {x}" if pd.notna(x) else "[未知-留出类]"
             )
 
-        new_test_csv = pd.concat([test_csv_a, test_csv_b, test_csv_c], ignore_index=True)
+        # (d) 源 val hold-out 剩余 → 移入 test
+        if len(val_holdout_to_test) > 0 and val_csv is not None:
+            test_csv_d = val_csv.iloc[val_holdout_to_test].copy()
+            test_csv_d['Label'] = unknown_label
+            if 'text_description' in test_csv_d.columns:
+                test_csv_d['text_description'] = test_csv_d['text_description'].apply(
+                    lambda x: f"[未知-留出类-来自val] {x}" if pd.notna(x) else "[未知-留出类-来自val]"
+                )
+            new_test_csv = pd.concat([test_csv_a, test_csv_b, test_csv_c, test_csv_d], ignore_index=True)
+        else:
+            new_test_csv = pd.concat([test_csv_a, test_csv_b, test_csv_c], ignore_index=True)
     else:
         new_test_csv = None
 

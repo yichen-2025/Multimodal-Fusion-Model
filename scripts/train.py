@@ -430,7 +430,8 @@ def train_model(model_path=None,
                 aug_prob=0.5,
                 llm_use_lora=None,
                 lora_r=8,
-                lora_alpha=16):
+                lora_alpha=16,
+                openset=False):
     """
     训练多模态融合模型
     
@@ -556,7 +557,7 @@ def train_model(model_path=None,
     print(f"  - 模型保存路径: {save_path}")
 
     train_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="train", 
-                                    dataset_id=dataset_id, split_id=split_id)
+                                    dataset_id=dataset_id, split_id=split_id, openset=openset)
     if train_dataset is None:
         print("未找到划分训练数据，将使用完整处理后的数据...")
         train_dataset = load_real_data(data_dir=os.path.join(PROJECT_ROOT, "processed_data"))
@@ -570,11 +571,11 @@ def train_model(model_path=None,
         print(f"自动检测类别数: {num_classes}")
     
     val_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="val",
-                                  dataset_id=dataset_id, split_id=split_id)
+                                  dataset_id=dataset_id, split_id=split_id, openset=openset)
     if val_dataset is None:
         print("未找到验证集(val)数据，尝试使用测试集(test)作为验证集...")
         val_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="test",
-                                      dataset_id=dataset_id, split_id=split_id)
+                                      dataset_id=dataset_id, split_id=split_id, openset=openset)
     if val_dataset is None:
         print("警告：未找到任何验证集数据，将跳过训练过程中的评估。")
 
@@ -870,6 +871,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_augmentation", action='store_true', help="使用数值特征数据增强")
     parser.add_argument("--aug_noise_std", type=float, default=0.01, help="数据增强高斯噪声标准差")
     parser.add_argument("--aug_prob", type=float, default=0.5, help="数据增强应用概率")
+    parser.add_argument("--openset", action="store_true", default=False, help="加载开集划分(split_openset_*)，训练集不含未知类")
     args = parser.parse_args()
 
     train_model(
@@ -904,5 +906,6 @@ if __name__ == "__main__":
         prototype_loss_weight=args.prototype_loss_weight,
         use_augmentation=args.use_augmentation,
         aug_noise_std=args.aug_noise_std,
-        aug_prob=args.aug_prob
+        aug_prob=args.aug_prob,
+        openset=args.openset
     )
