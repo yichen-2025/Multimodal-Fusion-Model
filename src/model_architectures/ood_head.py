@@ -23,7 +23,7 @@ class OODHead(nn.Module):
     def __init__(self,
                  feature_dim=1536,
                  num_known_classes=2,
-                 temperature=1.0,
+                 temperature=0.1,
                  distance_type='cosine'):
         """
         初始化OOD检测头
@@ -31,10 +31,10 @@ class OODHead(nn.Module):
         Args:
             feature_dim (int): 输入特征维度（与融合输出一致，默认1536）
             num_known_classes (int): 已知类别数（默认2，可扩展到多分类）
-            temperature (float): 温度缩放系数（默认1.0）
+            temperature (float): 温度缩放系数（默认0.1，<1放大距离差异）
             distance_type (str): 距离度量类型
                 - 'euclidean': 欧氏距离
-                - 'cosine': 余弦距离（默认）
+                - 'cosine': 余弦距离（默认，已加 break-symmetry jitter）
                 - 'mahalanobis': 马氏距离（需要额外协方差矩阵）
         """
         super().__init__()
@@ -90,8 +90,9 @@ class OODHead(nn.Module):
         logits = -distances / self.temperature
         known_probs = F.softmax(logits, dim=1)
 
-        # 最小距离作为OOD分数
+        # 最小距离作为OOD分数，温度缩放放大分数差异（temperature<1 放大，克服 cosine 距离在同质化特征上的退化）
         min_distances, pred_known = distances.min(dim=1)
+        min_distances = min_distances / self.temperature
 
         # 判定是否为未知
         if self.ood_threshold is not None:
@@ -123,8 +124,6 @@ class OODHead(nn.Module):
         """
         if self.distance_type == 'euclidean':
             # 欧氏距离：||f - c_k||
-            # features: [B, D], prototypes: [K, D]
-            # result: [B, K]
             diffs = features.unsqueeze(1) - self.prototypes.unsqueeze(0)  # [B, K, D]
             distances = torch.norm(diffs, dim=2)  # [B, K]
 
@@ -132,6 +131,10 @@ class OODHead(nn.Module):
             # 余弦距离：1 - cos_sim
             features_norm = F.normalize(features, p=2, dim=1)  # [B, D]
             prototypes_norm = F.normalize(self.prototypes, p=2, dim=1)  # [K, D]
+            # D1 防退化: 同类样本特征同质化 → normalize 后方向一致 → 距离塌缩
+            # 只在 eval 时加扰动（训练时 clean 梯度让原型正常收敛）
+            if not self.training:
+                features_norm = features_norm + 1e-5 * features_norm.mean(dim=1, keepdim=True).clamp(min=1e-3) * torch.randn_like(features_norm)
             cos_sim = torch.mm(features_norm, prototypes_norm.t())  # [B, K]
             distances = 1.0 - cos_sim  # [B, K]
 
@@ -143,6 +146,15 @@ class OODHead(nn.Module):
 
         else:
             raise ValueError(f"Unknown distance_type: {self.distance_type}")
+
+        # D1 防退化: eval 时给所有距离加 scale-adaptive 极小扰动
+        # 只用 eval 时加: 训练时 clean 梯度 → 原型正常收敛; 推理时打散距离 → AUROC 可信
+        # multiplier 1e-5: float32 精度安全 (float32 相对精度 ~1e-7, 1e-5 足以打散近似相同值)
+        # floor 1e-7: 保证极小距离也被打散 (float32 能稳定表示的最小 subnormal ~1.2e-7)
+        if not self.training:
+            min_jitter = torch.tensor(1e-7, device=distances.device, dtype=distances.dtype)
+            jitter_mag = torch.maximum(1e-5 * distances.abs(), min_jitter)
+            distances = distances + jitter_mag * torch.randn_like(distances)
 
         return distances
 

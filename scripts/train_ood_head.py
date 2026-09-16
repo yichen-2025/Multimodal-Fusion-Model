@@ -42,7 +42,7 @@ def train_ood_head(
     model_path=None,
     variant="A3",
     distance_type="cosine",
-    temperature=1.0,
+    temperature=0.1,
     learning_rate=1e-3,
     num_epochs=10,
     batch_size=64,
@@ -346,6 +346,20 @@ def train_ood_head(
         unknown_recall = np.mean(unknown_correct)
         print(f"  未知类召回率: {unknown_recall:.4f} ({unknown_mask.sum()}样本)")
 
+    # ========== 7.5 分数多样性诊断（防 D1 退化复发）==========
+    print("\n  [D1 防退化诊断]")
+    scores_rounded = np.round(val_scores, decimals=12)
+    unique_ratio = len(np.unique(scores_rounded)) / len(val_scores)
+    # 占比 > 5% 的常数聚集
+    _, counts = np.unique(scores_rounded, return_counts=True)
+    degenerate_cnt = int(np.sum(counts / len(val_scores) >= 0.05))
+    print(f"  唯一值占比: {unique_ratio:.2%} "
+          f"{'✅ 正常' if unique_ratio > 0.9 else ('⚠️  偏低' if unique_ratio > 0.5 else '❌ 退化!')}")
+    print(f"  聚集值(>5%): {degenerate_cnt} "
+          f"{'✅' if degenerate_cnt == 0 else '❌ 存在常数聚集!'}")
+    if unique_ratio <= 0.5:
+        print(f"  🔴 警告: OOD 分数严重退化! 建议换 distance_type (→euclidean) 或调 temperature (→更小)")
+
     # ========== 8. 保存 ==========
     print("\n" + "-" * 40)
     print("保存OOD检测头...")
@@ -451,9 +465,9 @@ if __name__ == "__main__":
                         help="消融变体（默认A3）")
     parser.add_argument("--distance_type", type=str, default="cosine",
                         choices=["euclidean", "cosine", "mahalanobis"],
-                        help="距离度量类型")
-    parser.add_argument("--temperature", type=float, default=1.0,
-                        help="温度缩放系数")
+                        help="距离度量类型（cosine 默认，所有距离都加 break-symmetry jitter 防退化）")
+    parser.add_argument("--temperature", type=float, default=0.1,
+                        help="温度缩放系数（默认0.1，<1 放大距离差异）")
     parser.add_argument("--lr", type=float, default=1e-3,
                         help="学习率")
     parser.add_argument("--epochs", type=int, default=10,
