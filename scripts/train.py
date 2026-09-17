@@ -579,6 +579,20 @@ def train_model(model_path=None,
     if val_dataset is None:
         print("警告：未找到任何验证集数据，将跳过训练过程中的评估。")
 
+    # openset 模式下，验证集可能包含 label = unknown_label 的样本
+    # 这些样本不在模型的 num_classes 范围内，CrossEntropyLoss 会越界
+    # 过滤掉它们，验证阶段只评估 known 类的分类性能
+    if val_dataset is not None:
+        val_labels_arr = np.array([s['label'] for s in val_dataset])
+        valid_mask = val_labels_arr < num_classes
+        n_total = len(val_dataset)
+        n_valid = int(valid_mask.sum())
+        n_filtered = n_total - n_valid
+        if n_filtered > 0:
+            print(f"检测到 {n_filtered} 个 label >= num_classes({num_classes}) 的验证样本（可能是 openset unknown），将过滤...")
+            val_dataset = val_dataset.select(np.where(valid_mask)[0].tolist())
+            print(f"过滤后验证集: {n_valid} 样本")
+
     # 计算类别权重（用于加权损失函数）
     class_weights = None
     if use_class_weights:
@@ -782,6 +796,7 @@ def train_model(model_path=None,
         f.write(f"use_augmentation: {use_augmentation}\n")
         f.write(f"aug_noise_std: {aug_noise_std}\n")
         f.write(f"aug_prob: {aug_prob}\n")
+        f.write(f"openset: {openset}\n")
         f.write(f"duration_seconds: {duration_seconds}\n")
     
     print(f"模型配置已保存到 {os.path.join(save_path, 'config.txt')}")
@@ -829,7 +844,8 @@ def train_model(model_path=None,
         'prototype_loss_weight': prototype_loss_weight,
         'use_augmentation': use_augmentation,
         'aug_noise_std': aug_noise_std,
-        'aug_prob': aug_prob
+        'aug_prob': aug_prob,
+        'openset': openset
     }
     log_id = save_log('training', log_data)
     print(f"\n模型训练日志已保存: logs/training/log_{log_id}.json")
