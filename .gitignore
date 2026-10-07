@@ -47,6 +47,8 @@ venv/
 *~
 
 # IDE配置
+# Jupyter checkpoints
+.ipynb_checkpoints/
 .vscode/
 .idea/
 *.swp
