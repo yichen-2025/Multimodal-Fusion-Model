@@ -513,7 +513,7 @@ def main():
     print("=" * 60)
     
     model = MultiModalFusionModel.from_pretrained(
-        llm_model_path=MODEL_PATH,
+        llm_model_path_or_save_dir=MODEL_PATH,
         save_dir=SAVED_MODEL_PATH
     )
     
