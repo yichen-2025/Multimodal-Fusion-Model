@@ -21,6 +21,7 @@ saved_models/
 
 # 日志文件
 logs/
+run_history/
 
 # 测试报告
 test_reports/
