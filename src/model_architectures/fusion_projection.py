@@ -43,7 +43,10 @@ class FeatureFusionProjection(nn.Module):
             
         elif fusion_type == "add":
             # add策略：投影到同一维度后相加
-            common_dim = 256  # 公共维度
+            # 动态公共维度：取数值编码器输出维度（128d），文本投影到数值空间
+            common_dim = numeric_dim if numeric_dim > 0 else (bert_dim // 4)
+            if common_dim < 32:
+                common_dim = 32
             self.numeric_projection = nn.Linear(numeric_dim, common_dim) if numeric_dim > 0 else None
             self.bert_projection = nn.Linear(bert_dim, common_dim) if bert_dim > 0 else None
             self.fusion_projection = nn.Sequential(
