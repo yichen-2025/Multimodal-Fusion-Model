@@ -16,6 +16,7 @@ from sklearn.metrics import (
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, PROJECT_ROOT)
+from utils.dirs import ensure_dirs
 
 from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.model_architectures.ood_head import OODHead
@@ -537,6 +538,7 @@ def run_ood_routing(
 
 
 if __name__ == "__main__":
+    ensure_dirs()
     parser = argparse.ArgumentParser(description="OOD路由评估：A3(known) + LLM(unknown)")
     parser.add_argument("--backbone_model_id", type=int, required=True,
                         help="A3 backbone模型ID")

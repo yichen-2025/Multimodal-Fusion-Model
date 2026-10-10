@@ -1,91 +1,47 @@
 # 如何运行本项目
 
+本项目所有步骤均通过**直接脚本 CLI** 运行，不再使用 `main.py --run` 统一入口。
+
 ## 快速开始
 
-```bash
-# 1. 在 configs/run_configs.py 中修改 RUN_CONFIG 字典里的参数并保存
-# 2. 在命令行执行：
-python main.py --run <配置键名>
-
-# 3. 也可以在配置键名后追加参数来覆盖 RUN_CONFIG 中的值：
-python main.py --run <配置键名> --<参数名> <值>
-```
-
-## 示例
+在项目根目录下直接执行脚本：
 
 ```bash
-# 运行训练，参数来自 RUN_CONFIG["train"]
-python main.py --run train
-
-# 运行训练，但覆盖 dataset_id 和 learning_rate
-python main.py --run train --dataset_id 10 --learning_rate 0.001
-
-# 运行数据清洗
-python main.py --run clean
-
-# 运行子集提取
-python main.py --run subset
-
-# 运行消融实验
-python main.py --run ablation
-
-# 运行完整的开集实验
-python main.py --run experiment
+python scripts/<脚本名>.py --参数
 ```
 
-## 工作原理
-
-### 配置
-
-所有运行配置定义在 `configs/run_configs.py` 的 `RUN_CONFIG` 字典中。每个条目结构如下：
-
-```python
-RUN_CONFIG = {
-    "train": {                              # <-- 配置键名（--run 使用此名称）
-        "step": "train",                    # <-- 映射到 main.py 中的步骤
-        "params": {                         # <-- 传递给函数的参数
-            "variant": "A0",
-            "dataset_id": 2,
-            "learning_rate": 5e-4,
-            "num_train_epochs": 10,
-            # ... 更多参数
-        }
-    },
-}
-```
-
-### 命令行参数覆盖
-
-在配置键名后追加 `--<参数名> <值>` 会覆盖 `RUN_CONFIG["<配置键名>"]["params"]` 中对应的参数值。未覆盖的参数仍使用 `RUN_CONFIG` 中的值。
-
-| 命令格式 | 示例 | 效果 |
-|---|---|---|
-| `python main.py --run <键名>` | `python main.py --run train` | 使用 `RUN_CONFIG["train"]["params"]` 的全部参数 |
-| `python main.py --run <键名> --<参数> <值>` | `python main.py --run train --dataset_id 10 --learning_rate 0.001` | 在 `RUN_CONFIG` 参数基础上，用命令行值覆盖指定参数 |
-
-### 列出所有可用配置
+例如：
 
 ```bash
-python main.py --list
+# 数据清洗
+python scripts/data_cleaning.py
+
+# 提取子集
+python scripts/extract_subset.py --total_samples 5000 --dataset_id 0
+
+# 模态分离
+python scripts/split_modality.py --dataset_id 0
+
+# 训练 A3
+python scripts/train.py --variant A3 --dataset_id 0 --split_id 0
+
+# 测试
+python scripts/test_model.py --model_id <id> --dataset_id 0 --split_id 0
 ```
 
-该命令会按阶段分组打印所有配置键名及其默认参数。
+查看某个脚本支持的所有参数：
 
-### 配置键名参考
+```bash
+python scripts/<脚本名>.py --help
+```
 
-| 键名 | 阶段 | 说明 |
-|---|---|---|
-| `clean` | P0 数据预处理 | 数据清洗 |
-| `subset` | P0 数据预处理 | 从清洗后的数据中提取子集 |
-| `split` | P0 数据预处理 | 模态分离（train/val/test） |
-| `train` | P0 模型训练 | 训练多模态融合模型 |
-| `test` | P0 模型训练 | 测试已训练的模型 |
-| `ablation` | P0 模型训练 | 运行消融实验 |
-| `openset` | P1 开集检测 | 构造开集数据集 |
-| `fewshot` | P1 少样本 | 构造少样本数据集 |
-| `ood_train` | P1 少样本 | 训练 OOD 检测头 |
-| `ood_eval` | P1 少样本 | OOD 路由评估 |
-| `experiment` | P1 少样本 | 一键完整实验 |
-| `report` | P1 少样本 | 生成汇总报告 |
+## 完整命令模板
 
-> **注意：** 配置文件中还包含 `*_default` 条目（如 `train_default`、`subset_default`），它们作为参考基准。实际运行时请修改不带 `_default` 后缀的键（如 `train`、`subset`）。
+常用命令模板（含参数说明与产物）见 **[`docs/commands.md`](docs/commands.md)**，可直接复制使用。
+
+## 运行方式说明
+
+- 所有脚本均自带独立 CLI（`argparse`），不依赖任何统一入口。
+- 脚本运行时会自动创建所需目录（通过 `utils/dirs.py` 的 `ensure_dirs()`）。
+- `<id>` 表示前序步骤生成的真实数字 ID（如 `saved_models/model_9` 中的 `9`）。
+- 含 LLM 的变体（如 `A0*`）需 GPU；`A3`（无 LLM，纯 MLP）可在 CPU 上快速验证。

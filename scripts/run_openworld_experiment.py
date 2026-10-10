@@ -9,6 +9,7 @@ from datetime import datetime
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, PROJECT_ROOT)
+from utils.dirs import ensure_dirs
 
 from utils.log_utils import save_log, get_next_log_id
 
@@ -393,6 +394,7 @@ def run_openworld_experiment(
 
 
 if __name__ == "__main__":
+    ensure_dirs()
     parser = argparse.ArgumentParser(
         description="开放世界融合模型完整实验",
         formatter_class=argparse.RawDescriptionHelpFormatter,

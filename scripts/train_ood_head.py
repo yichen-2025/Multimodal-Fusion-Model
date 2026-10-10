@@ -10,6 +10,7 @@ import argparse
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, PROJECT_ROOT)
+from utils.dirs import ensure_dirs
 
 from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.model_architectures.ood_head import OODHead, OODLoss
@@ -454,6 +455,7 @@ def train_ood_head(
 
 
 if __name__ == "__main__":
+    ensure_dirs()
     parser = argparse.ArgumentParser(description="训练OOD检测头（基于预训练模型）")
     parser.add_argument("--model_id", type=int, default=None,
                         help="已训练模型ID（saved_models/model_{id}）")

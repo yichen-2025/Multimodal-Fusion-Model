@@ -9,6 +9,8 @@ from datetime import datetime
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, PROJECT_ROOT)
+from utils.dirs import ensure_dirs
 
 
 def collect_ood_routing_reports(report_dir=None):
@@ -387,6 +389,7 @@ def generate_markdown_summary(routing_reports, ood_logs, openset_logs, fewshot_l
 
 
 if __name__ == "__main__":
+    ensure_dirs()
     parser = argparse.ArgumentParser(description="开放世界实验汇总报告生成器")
     parser.add_argument("--output_dir", type=str, default=None, help="输出目录")
     args = parser.parse_args()

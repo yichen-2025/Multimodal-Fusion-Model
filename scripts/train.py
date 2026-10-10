@@ -10,6 +10,7 @@ import numpy as np
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, PROJECT_ROOT)
+from utils.dirs import ensure_dirs
 
 from torch.utils.data import WeightedRandomSampler
 from transformers import Trainer, TrainingArguments, AutoTokenizer, TrainerCallback, EarlyStoppingCallback
@@ -854,6 +855,7 @@ def train_model(model_path=None,
 
 
 if __name__ == "__main__":
+    ensure_dirs()
     parser = argparse.ArgumentParser(description="训练多模态融合模型（支持消融实验）")
     parser.add_argument("--model_path", type=str, default=None, help="LLM模型路径")
     parser.add_argument("--model_id", type=int, default=None, help="模型ID（默认自动递增）")

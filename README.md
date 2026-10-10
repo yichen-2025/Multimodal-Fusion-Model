@@ -38,7 +38,6 @@
 
 ```
 Multimodal-Fusion-Model/
-├── main.py                        # 主入口文件
 ├── README.md                      # 项目说明文档
 ├── implementation_guide.md          # 实施指南（从零执行，含正确命令）
 ├── 原理图.png                      # 项目原理图
@@ -74,12 +73,14 @@ Multimodal-Fusion-Model/
 │       └── ood_head.py            # OOD检测头（基于原型距离）
 │
 ├── utils/                         # 工具模块
+│   ├── dirs.py                    # 必需目录统一创建（ensure_dirs）
 │   └── log_utils.py               # 日志记录工具
 │
 ├── tests/                         # 测试套件
 │   └── test_project.py            # 项目测试
 │
 ├── docs/                          # 文档
+│   ├── commands.md                # 命令模板（参数说明+产物，直接复制用）
 │   ├── theory.md                  # 项目原理说明（旧架构，仅供参考）
 │   ├── 代码结构与数据流.md          # 文件功能 + 数据流动图
 │   └── Phase1_流程说明.md          # Phase 1 流程说明
@@ -209,26 +210,22 @@ set HF_ENDPOINT=https://hf-mirror.com
 
 ### 4. 运行项目
 
-所有步骤通过统一入口 `main.py` 的 `--run <配置名>` 执行（配置定义见 `configs/run_configs.py`）。先查看可用配置：
-
-```bash
-python main.py --list
-```
+所有步骤通过**直接脚本 CLI** 运行（`python scripts/xxx.py --参数`），不再使用统一入口。完整命令模板见 [`docs/commands.md`](docs/commands.md)。
 
 从零跑通闭集（P0）流程：
 
 ```bash
-python main.py --run clean
-python main.py --run subset --dataset_id 3
-python main.py --run split  --dataset_id 3
+python scripts/data_cleaning.py
+python scripts/extract_subset.py --dataset_id 3
+python scripts/split_modality.py --dataset_id 3
 # 训练 A3（无 LLM，纯 MLP，最快）→ 记录终端打印的 model_id
-python main.py --run train  --dataset_id 3 --split_id 0 --variant A3
+python scripts/train.py --dataset_id 3 --split_id 0 --variant A3
 # 训练 A0*（含冻结 Qwen + LoRA，需 GPU）→ 记录 model_id
-python main.py --run train  --dataset_id 3 --split_id 0 --variant A0*
+python scripts/train.py --dataset_id 3 --split_id 0 --variant A0*
 # 测试 A3
-python main.py --run test   --dataset_id 3 --split_id 0 --model_id <A3_model_id>
+python scripts/test_model.py --dataset_id 3 --split_id 0 --model_id <A3_model_id>
 # 一次性跑闭集消融（默认覆盖 A3 / A0* / A0_frozen；全六变体加 --variants）
-python main.py --run ablation --dataset_id 3 --split_id 0
+python scripts/run_ablation.py --dataset_id 3 --split_id 0
 ```
 
 > 提示：`model_id` 为训练后 `saved_models/` 下的真实目录名（如 `model_9`）。`dataset_id` / `split_id` 建议全程固定。
@@ -275,12 +272,12 @@ OOD 检测头基于**类原型距离**检测未知样本；同一套头分别接
 
 ### 执行步骤（待脚本修复后）
 
-> 通过 `main.py --run` 调用。`<A3_id>`、`<A0*_id>`、`<ood_id>` 为前序步骤真实目录名。主战场用 **dataset_3（15 类，最难）**，复现用 dataset_0（12 类）。
+> 通过直接脚本 CLI 调用。`<A3_id>`、`<A0*_id>`、`<ood_id>` 为前序步骤真实目录名。主战场用 **dataset_3（15 类，最难）**，复现用 dataset_0（12 类）。
 
 #### Step 1 — 构造开集数据（留出类别→unknown）
 
 ```bash
-python main.py --run openset --dataset_id 3 --source_split_id 0 --unknown_ratio 0.3
+python scripts/make_openset_split.py --dataset_id 3 --source_split_id 0 --simulated_unknown_ratio 0.3
 ```
 
 产物：`split_data/dataset_3/split_openset_0/`（train/val 不含未知，test 含 `unknown`）
@@ -288,9 +285,9 @@ python main.py --run openset --dataset_id 3 --source_split_id 0 --unknown_ratio 
 #### Step 2 — 构造少样本数据
 
 ```bash
-python main.py --run fewshot --dataset_id 3 --source_split_id 0 --k_per_class 5
-python main.py --run fewshot --dataset_id 3 --source_split_id 0 --k_per_class 10
-python main.py --run fewshot --dataset_id 3 --source_split_id 0 --k_per_class 20
+python scripts/make_fewshot.py --dataset_id 3 --source_split_id 0 --k_values 5
+python scripts/make_fewshot.py --dataset_id 3 --source_split_id 0 --k_values 10
+python scripts/make_fewshot.py --dataset_id 3 --source_split_id 0 --k_values 20
 ```
 
 产物：`split_data/dataset_3/split_fewshot_<k>_0/`
@@ -299,9 +296,9 @@ python main.py --run fewshot --dataset_id 3 --source_split_id 0 --k_per_class 20
 
 ```bash
 # 先确保对应闭集主干已训好存档
-python main.py --run ood_train --model_id <A3_id>       --dataset_id 3 --split_id 0 --variant A3        --fewshot_k 5
-python main.py --run ood_train --model_id <A0*_id>      --dataset_id 3 --split_id 0 --variant A0*       --fewshot_k 5
-python main.py --run ood_train --model_id <A0_frozen_id> --dataset_id 3 --split_id 0 --variant A0_frozen --fewshot_k 5
+python scripts/train_ood_head.py --model_id <A3_id>       --dataset_id 3 --split_id 0 --variant A3        --fewshot_k 5
+python scripts/train_ood_head.py --model_id <A0*_id>      --dataset_id 3 --split_id 0 --variant A0*       --fewshot_k 5
+python scripts/train_ood_head.py --model_id <A0_frozen_id> --dataset_id 3 --split_id 0 --variant A0_frozen --fewshot_k 5
 ```
 
 产物：`saved_ood_heads/ood_<id>/`（原型向量 + 阈值）
@@ -309,7 +306,7 @@ python main.py --run ood_train --model_id <A0_frozen_id> --dataset_id 3 --split_
 #### Step 4 — 评测（OOD 头特征质量对比）
 
 ```bash
-python main.py --run ood_eval \
+python scripts/run_ood_routing.py \
     --backbone_model_id <A0*_id> \
     --ood_id <ood_id> \
     --dataset_id 3 --split_id 0 --fewshot_k 5
@@ -320,7 +317,7 @@ python main.py --run ood_eval \
 #### Step 5 — 生成汇总报告
 
 ```bash
-python main.py --run report
+python scripts/report_generator.py
 ```
 
 产物：
