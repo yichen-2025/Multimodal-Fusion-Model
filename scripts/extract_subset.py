@@ -9,6 +9,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
 sys.path.insert(0, PROJECT_ROOT)
+from utils.dirs import ensure_dirs
 from utils.log_utils import save_log
 from config.label_config import MERGED_LABEL_NAMES
 
@@ -254,6 +255,7 @@ def extract_subset(total_samples=None, ratio=None, mode="stratified",
 
 
 if __name__ == "__main__":
+    ensure_dirs()
     parser = argparse.ArgumentParser(
         description="多分类数据集子集提取 — 支持分层采样、平衡采样和自定义采样"
     )

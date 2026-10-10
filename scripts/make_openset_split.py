@@ -10,6 +10,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
 sys.path.insert(0, PROJECT_ROOT)
+from utils.dirs import ensure_dirs
 from utils.log_utils import save_log
 
 SPLIT_DATA_DIR = os.path.join(PROJECT_ROOT, "split_data")
@@ -538,6 +539,7 @@ def make_openset_split(dataset_id=0,
 
 
 if __name__ == "__main__":
+    ensure_dirs()
     parser = argparse.ArgumentParser(
         description="构造多分类开集数据集划分（留出类别策略 — 真正的 OOD）"
     )

@@ -11,6 +11,7 @@ import pandas as pd
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, PROJECT_ROOT)
+from utils.dirs import ensure_dirs
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report
 from transformers import AutoTokenizer
@@ -606,4 +607,5 @@ def main():
 
 
 if __name__ == "__main__":
+    ensure_dirs()
     main()

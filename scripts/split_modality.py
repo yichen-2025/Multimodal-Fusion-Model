@@ -10,6 +10,7 @@ import json
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, PROJECT_ROOT)
+from utils.dirs import ensure_dirs
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
@@ -308,6 +309,7 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VA
 
 
 if __name__ == "__main__":
+    ensure_dirs()
     parser = argparse.ArgumentParser(description="模态分离脚本，将数据集划分为训练集、验证集和测试集")
     parser.add_argument("--dataset_id", type=int, default=0, help="数据集ID（默认0）")
     parser.add_argument("--split_id", type=int, default=None, help="划分ID（默认自动递增）")

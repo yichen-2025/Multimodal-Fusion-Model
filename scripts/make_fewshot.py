@@ -8,6 +8,7 @@ import pandas as pd
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, PROJECT_ROOT)
+from utils.dirs import ensure_dirs
 from utils.log_utils import save_log
 
 SPLIT_DATA_DIR = os.path.join(PROJECT_ROOT, "split_data")
@@ -309,6 +310,7 @@ def make_fewshot_split(dataset_id=1,
 
 
 if __name__ == "__main__":
+    ensure_dirs()
     parser = argparse.ArgumentParser(
         description="构造少样本数据集 — 从开集划分中每已知类抽取k个样本作训练集"
     )

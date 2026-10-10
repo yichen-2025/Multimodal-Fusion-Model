@@ -13,6 +13,7 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, PROJECT_ROOT)
+from utils.dirs import ensure_dirs
 from config.label_config import (
     ORIGINAL_LABEL_MAPPING,
     ORIGINAL_LABEL_NAMES,
@@ -313,6 +314,7 @@ def main(use_merged=True):
 
 
 if __name__ == "__main__":
+    ensure_dirs()
     parser = argparse.ArgumentParser(description="多分类数据清洗与合并脚本")
     parser.add_argument("--use_merged", action='store_true', default=True,
                         help="使用合并后的12类标签（默认开启）")
