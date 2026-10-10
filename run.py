@@ -101,6 +101,7 @@ def main():
     record = CommandRecord(
         command=command_str,
         execute_date=now.strftime("%Y-%m-%d"),
+        execute_time=now.strftime("%H:%M:%S"),
         duration_seconds=0.0,
         status="success",
         generated_files=list(meta["generated_files"]),

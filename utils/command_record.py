@@ -1,4 +1,5 @@
-"""命令运行记录对象。
+"""
+命令运行记录对象。
 
 把每次命令行运行抽象为一个 CommandRecord 对象，
 属性明确、可扩展，替代已删除的 run_tracker 正则提取方案。
@@ -9,7 +10,9 @@ from typing import Optional
 
 @dataclass
 class CommandRecord:
-    """一次命令行运行的完整记录"""
+    """
+    一次命令行运行的完整记录
+    """
 
     # -- 用户指定的核心属性 --
     command: str                       # 命令行内容（完整）
@@ -22,6 +25,7 @@ class CommandRecord:
     notes: str                         # 附加说明（来自注册表 + 可运行时追加）
 
     # -- 辅助属性（自动填充，便于追溯） --
+    execute_time: str = ""              # 执行时间，格式 HH:MM:SS
     timestamp: str = ""                # 完整时间戳 ISO 格式
     exit_code: Optional[int] = None    # 真实命令退出码
     script: str = ""                   # 脚本名（从 command 解析，用于查注册表）
@@ -31,5 +35,7 @@ class CommandRecord:
     extra: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        """序列化为 dict（用于写 JSONL）"""
+        """
+        序列化为 dict（用于写 JSONL）
+        """
         return asdict(self)
