@@ -147,9 +147,12 @@ def _find_existing_model(seed, variant, dataset_id, split_id, openset=False,
 
         # openset 兼容处理
         cfg_openset = cfg.get("openset")
-        if cfg_openset is not None and cfg_openset != openset:
+        if cfg_openset is None:
+            # 老模型（保存时没 openset 字段）：仅当搜索 openset=False 时视作兼容匹配
+            if openset:
+                continue
+        elif cfg_openset != openset:
             continue
-        # cfg_openset is None 说明是老模型（保存时没这个字段），仅当 openset=False 时视作兼容匹配
 
         try:
             model_id = int(entry.replace("model_", ""))
@@ -160,11 +163,10 @@ def _find_existing_model(seed, variant, dataset_id, split_id, openset=False,
     if not matches:
         return None, None
 
-    # 多个匹配时，优先 openset 明确一致的；否则返回 model_id 最大的（最新训练的）
+    # 多个匹配时，优先 openset 明确一致的；在该子集里取 model_id 最大的（最新训练的）
     exact = [m for m in matches if m[1].get("openset") == openset]
-    chosen = exact[0] if exact else matches[0]
-    if len(matches) > 1:
-        chosen = max(matches, key=lambda m: m[0])  # model_id 最大
+    candidates = exact if exact else matches
+    chosen = max(candidates, key=lambda m: m[0])
     return chosen
 
 
