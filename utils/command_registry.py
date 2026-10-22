@@ -105,6 +105,13 @@ COMMAND_REGISTRY = {
         "modified_files": [],
         "notes": "耗时长",
     },
+    "generate_explanations": {
+        "generated_files": [
+            "explanation_results/explanations_model<id>_<timestamp>.json",
+        ],
+        "modified_files": [],
+        "notes": "Phase2 B1: A3预测 + 基座LLM生成解释+MITRE映射",
+    },
 }
 
 # 未注册命令的默认模板
