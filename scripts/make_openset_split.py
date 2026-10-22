@@ -12,6 +12,7 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, PROJECT_ROOT)
 from utils.dirs import ensure_dirs
 from utils.log_utils import save_log
+from utils.caliber import CaliberError
 
 SPLIT_DATA_DIR = os.path.join(PROJECT_ROOT, "split_data")
 
@@ -98,6 +99,7 @@ def make_openset_split(dataset_id=0,
                        output_split_id=None,
                        hold_out_classes=None,
                        simulated_unknown_ratio=0.1,
+                       allow_mixed_calibration=False,
                        random_state=42,
                        use_default_holdout=True):
     """
@@ -355,6 +357,48 @@ def make_openset_split(dataset_id=0,
         val_holdout_extra_labels,
     ])
 
+    # ── unknown_origin: 0=known, 1=genuine_ood, 2=simulated_in_distribution ──
+    # 后续所有脚本据此拆分 known / 真实OOD / 分布内模拟，禁止把两种 unknown 混算
+    new_train_origin = np.zeros(len(new_train_labels), dtype=np.int64)  # 训练集全 known
+    new_val_origin = np.concatenate([
+        np.zeros(len(val_keep_idx), dtype=np.int64),             # val known
+        np.full(len(val_unknown_idx), 1, dtype=np.int64),        # val unknown = 真实 hold-out
+    ]) if len(val_unknown_idx) > 0 else np.zeros(len(val_keep_idx), dtype=np.int64)
+
+    new_test_origin = np.concatenate([
+        np.zeros(len(test_known_keep_labels), dtype=np.int64),   # (a) known keep
+        np.full(len(test_sim_labels), 2, dtype=np.int64),        # (b) simulated
+        np.full(len(holdout_labels), 1, dtype=np.int64),         # (c) 真实 hold-out
+        np.full(len(val_holdout_extra_labels), 1, dtype=np.int64),  # (d) 来自 val 的真实 hold-out
+    ])
+
+    # B1：声明了模拟比例却未生成任何模拟 unknown（比例过小或无非 BENIGN 候选）
+    if simulated_unknown_ratio > 0 and len(test_sim_labels) == 0:
+        raise CaliberError(
+            f"声明 simulated_unknown_ratio={simulated_unknown_ratio} 但未生成任何模拟 unknown，"
+            f"请检查比例或候选样本"
+        )
+
+    # B2：val 与 test 的 unknown 构成必须同源，否则阈值校准与评估口径不一致
+    n_val_sim = int(np.sum(new_val_origin == 2))
+    n_test_sim = int(np.sum(new_test_origin == 2))
+    if (n_val_sim > 0) != (n_test_sim > 0):
+        if not allow_mixed_calibration:
+            raise CaliberError(
+                f"val 模拟 unknown={n_val_sim}，test 模拟 unknown={n_test_sim}："
+                f"阈值校准口径与评估口径不一致。请让 val/test 同源，"
+                f"或显式传 --allow_mixed_calibration 声明混合校准"
+            )
+        print("  ⚠️ B2: 已声明 allow_mixed_calibration，val/test 的 unknown 构成不同，"
+              "所有下游报告须标注 mixed-calibration")
+
+    # B3：unknown 标签不得与真实类别冲突（known 必须是连续 0..K-1）
+    if known_classes != list(range(num_known_classes)):
+        raise CaliberError(
+            f"known_classes 不是连续的 0..{num_known_classes - 1}：{known_classes}，"
+            f"unknown_label={unknown_label} 会与真实类别冲突"
+        )
+
     # 打印新划分的统计
     print(f"\n  训练集 (known only): {len(new_train_labels)} 样本")
     for c in known_classes:
@@ -461,19 +505,24 @@ def make_openset_split(dataset_id=0,
     np.savez(os.path.join(output_dir, "train.npz"),
              scaled_features=new_train_stat,
              text_embeddings=new_train_bert,
-             labels=new_train_labels)
+             labels=new_train_labels,
+             unknown_origin=new_train_origin)
     print(f"  - train.npz: {len(new_train_labels)} 样本")
 
     np.savez(os.path.join(output_dir, "val.npz"),
              scaled_features=new_val_stat,
              text_embeddings=new_val_bert,
-             labels=new_val_labels)
+             labels=new_val_labels,
+             unknown_origin=new_val_origin,
+             unknown_calibration_mixed=np.array([int(bool(allow_mixed_calibration))]))
     print(f"  - val.npz: {len(new_val_labels)} 样本")
 
     np.savez(os.path.join(output_dir, "test.npz"),
              scaled_features=new_test_stat,
              text_embeddings=new_test_bert,
-             labels=new_test_labels)
+             labels=new_test_labels,
+             unknown_origin=new_test_origin,
+             unknown_calibration_mixed=np.array([int(bool(allow_mixed_calibration))]))
     print(f"  - test.npz: {len(new_test_labels)} 样本")
 
     if new_train_csv is not None:
@@ -521,6 +570,9 @@ def make_openset_split(dataset_id=0,
         'test_unknown_total': int(np.sum(new_test_labels == unknown_label)),
         'test_unknown_holdout': len(holdout_labels),
         'test_unknown_simulated': len(test_sim_labels),
+        'test_unknown_genuine': int(np.sum(new_test_origin == 1)),
+        'val_unknown_genuine': int(np.sum(new_val_origin == 1)),
+        'unknown_origin_saved': True,
         'output_dir': os.path.abspath(output_dir),
         'duration_seconds': round(duration_seconds, 3)
     }
@@ -550,6 +602,8 @@ if __name__ == "__main__":
                         help="完全留出的类别ID列表。默认自动使用 [10, 11] (Web Attack + Other Attack)")
     parser.add_argument("--simulated_unknown_ratio", type=float, default=0.1,
                         help="测试集中已知非BENIGN样本改为模拟unknown的比例（默认0.1，设为0关闭）")
+    parser.add_argument("--allow_mixed_calibration", action="store_true",
+                        help="允许 val/test 的 unknown 构成不同（阈值校准与评估混合口径）")
     parser.add_argument("--no_default_holdout", action="store_true",
                         help="关闭默认留出集（需要手动指定 --hold_out_classes）")
     parser.add_argument("--random_state", type=int, default=42, help="随机种子（默认42）")
@@ -561,6 +615,7 @@ if __name__ == "__main__":
         output_split_id=args.output_split_id,
         hold_out_classes=args.hold_out_classes,
         simulated_unknown_ratio=args.simulated_unknown_ratio,
+        allow_mixed_calibration=args.allow_mixed_calibration,
         random_state=args.random_state,
         use_default_holdout=not args.no_default_holdout,
     )

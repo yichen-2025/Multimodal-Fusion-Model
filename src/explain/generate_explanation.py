@@ -28,9 +28,10 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.explain.attack_mapping import (
     get_label_name,
-    get_mitre_for_label,
     get_all_mitre_techniques,
+    get_true_mitre_ids,
 )
+from utils.caliber import read_model_num_classes
 
 # src/explain/generate_explanation.py -> 上三级为项目根目录
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -53,25 +54,18 @@ def build_user_prompt(
     text_description: str,
     pred_label: int,
     pred_label_name: str,
-    mitre_mapping: Optional[Dict[str, str]],
 ) -> str:
-    """构建单条样本的 user prompt。"""
+    """构建单条样本的 user prompt（不泄漏 GT MITRE 提示）。"""
     # 候选 ATT&CK 技术列表
     techniques = get_all_mitre_techniques()
     tech_list_str = "\n".join(
         [f"  - {t['id']}: {t['name']}" for t in techniques]
     )
 
-    # GT 映射（作为参考，不直接告诉模型答案，而是作为候选之一）
-    gt_hint = ""
-    if mitre_mapping is not None:
-        gt_hint = f"\n参考：该攻击类别的典型 ATT&CK 编号为 {mitre_mapping['id']}（{mitre_mapping['name']}）。"
-
     prompt = f"""流量文本特征：
 {text_description}
 
 分类模型预测结果：{pred_label_name}（label={pred_label}）
-{gt_hint}
 
 候选 MITRE ATT&CK 技术列表：
 {tech_list_str}
@@ -130,13 +124,15 @@ def load_test_samples(
     split_id: int = 0,
     n_samples: Optional[int] = None,
     seed: int = 42,
+    openset: bool = True,
 ) -> List[Dict[str, Any]]:
-    """加载 openset 测试集样本。
+    """加载测试集样本（支持开集/闭集划分）。
 
     返回列表，每个元素包含 stat, bert, label, text。
     """
+    split_name = f"split_openset_{split_id}" if openset else f"split_{split_id}"
     split_dir = os.path.join(
-        PROJECT_ROOT, "split_data", f"dataset_{dataset_id}", f"split_openset_{split_id}"
+        PROJECT_ROOT, "split_data", f"dataset_{dataset_id}", split_name
     )
     npz_path = os.path.join(split_dir, "test.npz")
     csv_path = os.path.join(split_dir, "test_data.csv")
@@ -171,7 +167,7 @@ def load_test_samples(
         indices = rng.choice(len(samples), size=n_samples, replace=False)
         samples = [samples[i] for i in sorted(indices)]
 
-    print(f"加载 {len(samples)} 条测试样本（dataset={dataset_id}, split={split_id}）")
+    print(f"加载 {len(samples)} 条测试样本（dataset={dataset_id}, {split_name}）")
     return samples
 
 
@@ -237,13 +233,11 @@ def generate_explanation(
 ) -> Dict[str, Any]:
     """调用 LLM 生成单条样本的解释。"""
     pred_label_name = get_label_name(pred_label)
-    mitre_mapping = get_mitre_for_label(pred_label)
 
     user_prompt = build_user_prompt(
         text_description=text_description,
         pred_label=pred_label,
         pred_label_name=pred_label_name,
-        mitre_mapping=mitre_mapping,
     )
 
     # 构造对话消息
@@ -339,6 +333,7 @@ def run_explanation_generation(
     output_dir: Optional[str] = None,
     device: str = "cuda",
     seed: int = 42,
+    openset: bool = True,
 ) -> str:
     """执行完整的解释生成流程。
 
@@ -362,9 +357,14 @@ def run_explanation_generation(
     print(f"[1/4] 加载 backbone: model_{backbone_model_id}")
     backbone, backbone_tokenizer = load_backbone_model(backbone_model_id, device=device)
 
+    # 已知类数从模型 config.txt 读取（单一口径），用于剔除 unknown 的 MITRE 分母
+    num_known_classes = read_model_num_classes(
+        os.path.join(PROJECT_ROOT, "saved_models", f"model_{backbone_model_id}")
+    )
+
     # 2. 加载测试样本
     print(f"\n[2/4] 加载测试样本（n_samples={n_samples}）")
-    samples = load_test_samples(dataset_id, split_id, n_samples, seed)
+    samples = load_test_samples(dataset_id, split_id, n_samples, seed, openset=openset)
 
     # 3. backbone 预测
     print(f"\n[3/4] Backbone 批量预测")
@@ -395,7 +395,7 @@ def run_explanation_generation(
 
         true_label_name = get_label_name(sample["label"])
         pred_label_name = get_label_name(sample["pred_label"])
-        true_mitre = get_mitre_for_label(sample["label"])
+        true_mitre_ids = sorted(get_true_mitre_ids(sample["label"]))
 
         results.append(
             {
@@ -405,7 +405,8 @@ def run_explanation_generation(
                 "pred_label": sample["pred_label"],
                 "pred_label_name": pred_label_name,
                 "correct": sample["label"] == sample["pred_label"],
-                "true_mitre_id": true_mitre["id"] if true_mitre else None,
+                "true_mitre_id": true_mitre_ids[0] if len(true_mitre_ids) == 1 else None,
+                "true_mitre_ids": true_mitre_ids,
                 "predicted_mitre_id": llm_result["mitre_technique_id"],
                 "explanation": llm_result["explanation"],
                 "raw_response": llm_result.get("raw_response", ""),
@@ -422,6 +423,8 @@ def run_explanation_generation(
                     "dataset_id": dataset_id,
                     "split_id": split_id,
                     "n_samples": n_samples,
+                    "openset": openset,
+                    "num_known_classes": num_known_classes,
                     "llm_model_path": llm_model_path,
                     "seed": seed,
                     "timestamp": timestamp,
@@ -435,13 +438,20 @@ def run_explanation_generation(
 
     # 打印统计
     correct_count = sum(1 for r in results if r["correct"])
+    # D3: unknown（label >= num_known_classes）不进 MITRE 分母；
+    #      合并类用集合命中率（预测 ID 属于真值集合即可）
     mitre_match = sum(
         1
         for r in results
-        if r["true_mitre_id"] is not None
-        and r["predicted_mitre_id"] == r["true_mitre_id"]
+        if r["true_label"] < num_known_classes
+        and len(r["true_mitre_ids"]) > 0
+        and r["predicted_mitre_id"] in r["true_mitre_ids"]
     )
-    mitre_total = sum(1 for r in results if r["true_mitre_id"] is not None)
+    mitre_total = sum(
+        1
+        for r in results
+        if r["true_label"] < num_known_classes and len(r["true_mitre_ids"]) > 0
+    )
 
     print(f"\n{'=' * 60}")
     print(f"生成完成！共 {len(results)} 条")
@@ -486,6 +496,19 @@ def main():
     )
     parser.add_argument("--device", type=str, default="cuda", help="设备")
     parser.add_argument("--seed", type=int, default=42, help="随机种子")
+    parser.add_argument(
+        "--openset",
+        dest="openset",
+        action="store_true",
+        default=True,
+        help="加载开集划分 split_openset_*（默认）",
+    )
+    parser.add_argument(
+        "--no-openset",
+        dest="openset",
+        action="store_false",
+        help="加载闭集划分 split_*",
+    )
     args = parser.parse_args()
 
     run_explanation_generation(
@@ -497,6 +520,7 @@ def main():
         output_dir=args.output_dir,
         device=args.device,
         seed=args.seed,
+        openset=args.openset,
     )
 
 

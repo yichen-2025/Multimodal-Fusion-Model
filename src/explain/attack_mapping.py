@@ -66,3 +66,30 @@ def get_all_mitre_techniques() -> List[Dict[str, str]]:
             seen.add(mapping["id"])
             techniques.append(mapping)
     return techniques
+
+
+# 合并类标签 -> 有效 MITRE 技术集合（用于「集合命中率」，避免合并类被单 ID 精确匹配误判）。
+# 与 config/label_config.py 的 MERGED_LABEL_MAPPING（0-11）对齐：
+#   10 = Web Attack（合并 Brute Force / XSS / SQLi）
+#   11 = Other Attack（合并 Infiltration / Heartbleed）
+LABEL_TO_MITRE_SET: Dict[int, frozenset] = {
+    0: frozenset(),  # BENIGN
+    1: frozenset({"T1498.001"}),  # DoS Hulk
+    2: frozenset({"T1498.001"}),  # DoS GoldenEye
+    3: frozenset({"T1498.002"}),  # DoS slowloris
+    4: frozenset({"T1498.002"}),  # DoS Slowhttptest
+    5: frozenset({"T1498.001"}),  # DDoS
+    6: frozenset({"T1046"}),      # PortScan
+    7: frozenset({"T1110.001"}),  # FTP-Patator
+    8: frozenset({"T1110.001"}),  # SSH-Patator
+    9: frozenset({"T1071"}),      # Bot
+    10: frozenset({"T1110.001", "T1059.007", "T1190"}),  # Web Attack（合并类）
+    11: frozenset({"T1190"}),     # Other Attack（Infiltration/Heartbleed）
+    # 注意：unknown 标签 = 模型 config.txt 的 num_classes（10 类模型即 10，不是固定的 15）。
+    # unknown 由调用方按 num_known_classes 排除，不得写进本表。
+}
+
+
+def get_true_mitre_ids(label: int) -> frozenset:
+    """返回某标签的有效 MITRE 技术编号集合（合并类含多个子类技术）。"""
+    return LABEL_TO_MITRE_SET.get(label, frozenset())

@@ -140,6 +140,7 @@ def load_split_data(data_dir="split_data", data_type="train", dataset_id=0, spli
                 stat_features = npz_data['scaled_features']
                 bert_embeddings = npz_data['text_embeddings']
                 labels = npz_data['labels']
+                unknown_origin = npz_data['unknown_origin'] if 'unknown_origin' in npz_data else None
             else:
                 print(f"Error: No {data_type}.npz found in {split_dir}")
                 return None
@@ -152,6 +153,7 @@ def load_split_data(data_dir="split_data", data_type="train", dataset_id=0, spli
                 stat_features = npz_data['scaled_features']
                 bert_embeddings = npz_data['text_embeddings']
                 labels = npz_data['labels']
+                unknown_origin = npz_data['unknown_origin'] if 'unknown_origin' in npz_data else None
             else:
                 files = os.listdir(data_dir)
                 prefix = None
@@ -168,6 +170,7 @@ def load_split_data(data_dir="split_data", data_type="train", dataset_id=0, spli
                 stat_features = np.load(os.path.join(data_dir, f"{prefix}_scaled_features.npy"))
                 bert_embeddings = np.load(os.path.join(data_dir, f"{prefix}_text_embeddings.npy"))
                 labels = np.load(os.path.join(data_dir, f"{prefix}_labels.npy"))
+                unknown_origin = None
         
         current_dir = split_dir if os.path.exists(split_dir) else data_dir
         text_descriptions = None
@@ -187,6 +190,7 @@ def load_split_data(data_dir="split_data", data_type="train", dataset_id=0, spli
                 "stat": stat_features[i].astype(np.float32),
                 "bert": bert_embeddings[i].astype(np.float32),
                 "label": int(labels[i]),
+                "unknown_origin": int(unknown_origin[i]) if unknown_origin is not None else -1,
             }
             if text_descriptions is not None:
                 item["text"] = text_descriptions[i]

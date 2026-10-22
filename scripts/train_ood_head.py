@@ -16,6 +16,7 @@ from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.model_architectures.ood_head import OODHead, OODLoss
 from src.data.data_loader import load_split_data, collate_fn
 from utils.log_utils import save_log
+from utils.caliber import CaliberError, read_model_num_classes, assert_classifier_dim
 from config.label_config import MERGED_LABEL_NAMES
 
 # P0-1: 固定种子，确保 eval 可复现
@@ -42,7 +43,7 @@ def get_next_ood_id(base_dir=None):
 def train_ood_head(
     model_id=None,
     ood_id=None,
-    dataset_id=1,
+    dataset_id=0,
     split_id=0,
     model_path=None,
     variant="A3",
@@ -89,6 +90,13 @@ def train_ood_head(
     if model_path is None:
         model_path = os.path.join(PROJECT_ROOT, "models", "qwen2.5-1.5b")
 
+    # E1：默认数据集不得靠猜，不存在即报错
+    candidate_data_dir = os.path.join(PROJECT_ROOT, "split_data", f"dataset_{dataset_id}")
+    if not os.path.exists(candidate_data_dir):
+        raise CaliberError(
+            f"dataset_{dataset_id} 不存在，禁止使用脚本默认值，请显式传 --dataset_id"
+        )
+
     # ========== 1. 加载预训练模型 ==========
     print("=" * 60)
     print("OOD检测头训练")
@@ -112,6 +120,7 @@ def train_ood_head(
     use_bert = config["use_bert"]
     use_llm = config["use_llm"]
 
+    model_save_path = None
     if model_id is not None:
         # 从保存的模型加载
         model_save_path = os.path.join(PROJECT_ROOT, "saved_models", f"model_{model_id}")
@@ -227,7 +236,16 @@ def train_ood_head(
     print("\n" + "-" * 40)
     print("初始化OOD检测头...")
 
-    num_known_classes = len(np.unique(train_labels))
+    num_known_classes = None
+    if model_save_path is not None:
+        # P0-4：已知类数从 backbone 的 config.txt 读取，不取 len(unique(train_labels))
+        num_known_classes = read_model_num_classes(model_save_path)
+        assert_classifier_dim(model, num_known_classes)
+    else:
+        num_known_classes = getattr(model, 'num_classes', None)
+        if num_known_classes is None:
+            raise CaliberError("初始化新模型缺少 num_classes，无法确定已知类数")
+
     ood_head = OODHead(
         feature_dim=feature_dim,
         num_known_classes=num_known_classes,
@@ -461,8 +479,8 @@ if __name__ == "__main__":
                         help="已训练模型ID（saved_models/model_{id}）")
     parser.add_argument("--ood_id", type=int, default=None,
                         help="OOD头ID（默认自动递增）")
-    parser.add_argument("--dataset_id", type=int, default=1,
-                        help="数据集ID（默认1）")
+    parser.add_argument("--dataset_id", type=int, default=0,
+                        help="数据集ID（默认0）")
     parser.add_argument("--split_id", type=int, default=0,
                         help="划分ID（对应split_openset_{id}）")
     parser.add_argument("--model_path", type=str, default=None,

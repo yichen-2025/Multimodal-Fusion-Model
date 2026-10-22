@@ -18,6 +18,11 @@ from transformers import AutoTokenizer
 from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.data.data_loader import load_real_data, generate_mock_data, load_split_data
 from utils.open_set_eval import evaluate_open_set  # B8：统一评估口径
+from config.label_config import MERGED_LABEL_NAMES
+from utils.caliber import (
+    CaliberError, read_model_num_classes, assert_classifier_dim,
+    assert_label_space, validate_report, assert_index_schema,
+)
 
 REPORTS_DIR = os.path.join(PROJECT_ROOT, "test_reports")
 INDEX_FILE = os.path.join(REPORTS_DIR, "reports_index.csv")
@@ -165,6 +170,9 @@ def save_test_report(report_data):
     保存测试报告
     """
     os.makedirs(REPORTS_DIR, exist_ok=True)
+
+    # C：索引表必须是新口径 schema，未迁移时禁止新增行（否则会混写）
+    assert_index_schema(INDEX_FILE)
     
     report_id = report_data.get('report_id', get_next_report_id())
     report_data['report_id'] = report_id
@@ -186,6 +194,10 @@ def save_test_report(report_data):
         'model_id': report_data.get('model_id', ''),
         'dataset_id': report_data.get('dataset_id', ''),
         'split_id': report_data.get('split_id', ''),
+        'split_name': report_data.get('split_name', ''),
+        'openset': report_data.get('openset', ''),
+        'num_classes': report_data.get('num_classes', ''),
+        'metric_scope': report_data.get('metric_scope', ''),
         'test_samples': report_data.get('test_samples', ''),
         'test_positive': report_data.get('test_positive', ''),
         'test_negative': report_data.get('test_negative', ''),
@@ -217,6 +229,7 @@ def save_test_report(report_data):
                 df = pd.read_csv(temp_file)
             else:
                 df = pd.DataFrame(columns=['report_id', 'timestamp', 'model_id', 'dataset_id', 'split_id',
+                                           'split_name', 'openset', 'num_classes', 'metric_scope',
                                            'test_samples', 'test_positive', 'test_negative',
                                            'accuracy', 'precision', 'recall', 'f1',
                                            'tp', 'tn', 'fp', 'fn', 'duration_seconds',
@@ -271,7 +284,11 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
         llm_model_path_or_save_dir=llm_model_path,
         save_dir=saved_model_path
     )
-    
+
+    # 口径唯一真相源：num_classes 从模型配置读取，并断言分类头维度一致
+    num_classes = read_model_num_classes(saved_model_path)
+    assert_classifier_dim(model, num_classes)
+
     device = model.device
     
     if verbose:
@@ -310,10 +327,7 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
     results = evaluate_model(model, test_dataset, tokenizer, device)
     
     duration_seconds = time.time() - start_time
-    
-    cm = results['confusion_matrix']
-    num_classes = len(cm)
-    
+
     if verbose:
         print_evaluation_results(results)
         print(f"\n测试耗时: {duration_seconds:.2f}秒")
@@ -369,23 +383,27 @@ def test_model(dataset_id=0, split_id=0, model_id=0,
     return results
 
 
-def evaluate_open_set_model(model, dataset, tokenizer=None, device=None, num_known_classes=2):
+def evaluate_open_set_model(model, dataset, tokenizer=None, device=None, num_known_classes=None):
     """
-    开集三分类评估（含unknown类）
+    开集评估（含unknown类，按来源拆分指标）
 
     Args:
         model: 训练好的模型
         dataset: 测试数据集（标签含0,1,...,num_known_classes-1为已知，>=num_known_classes为未知）
         tokenizer: LLM tokenizer
         device: 运行设备
-        num_known_classes: 已知类别数
+        num_known_classes: 已知类别数（必填，禁止使用二分类遗留默认值）
 
     Returns:
         dict: 开集评估指标
     """
+    if num_known_classes is None:
+        raise CaliberError("evaluate_open_set_model 必须显式传入 num_known_classes")
+
     model.eval()
     all_preds = []
     all_labels = []
+    all_origins = []
 
     if device is None:
         device = model.device
@@ -411,15 +429,20 @@ def evaluate_open_set_model(model, dataset, tokenizer=None, device=None, num_kno
 
             all_preds.append(pred)
             all_labels.append(label)
+            all_origins.append(sample.get("unknown_origin", -1))
 
     true_arr = np.array(all_labels)
     pred_arr = np.array(all_preds)
+    origin_arr = np.array(all_origins)
+    has_origin = bool(origin_arr.size and np.any(origin_arr >= 0))
 
-    # B8：评估逻辑已抽到 utils.open_set_eval，这里统一调用
+    # B8：评估逻辑已抽到 utils.open_set_eval，这里统一调用（含来源拆分）
     results = evaluate_open_set(
         true_arr, pred_arr, num_known_classes,
-        include_routing_stats=False  # test_model 不需要路由统计字段
+        include_routing_stats=False,  # test_model 不需要路由统计字段
+        origin=origin_arr if has_origin else None
     )
+    results['unknown_origin_available'] = has_origin
 
     # 保留模型原始输出供下游分析
     results['predictions'] = all_preds
@@ -433,19 +456,16 @@ def print_open_set_results(results):
     print("=" * 60)
     print("开集评估结果")
     print("=" * 60)
-    print(f"\n整体准确率: {results['accuracy']:.4f}")
-    print(f"Macro-F1: {results['macro_f1']:.4f}")
+    print(f"\n整体准确率(混合口径): {results['accuracy']:.4f}")
+    print(f"Macro-F1(open，含 unknown): {results['macro_f1']:.4f}")
 
-    label_names = {
-        0: "BENIGN", 1: "DoS Hulk", 2: "DoS GoldenEye", 3: "DoS slowloris",
-        4: "DoS Slowhttptest", 5: "DDoS", 6: "PortScan", 7: "FTP-Patator",
-        8: "SSH-Patator", 9: "Bot", 10: "Web Attack - Brute Force",
-        11: "Web Attack - XSS", 12: "Web Attack - Sql Injection",
-        13: "Infiltration", 14: "Heartbleed"
-    }
+    # 开集里 label=K 是 unknown，不能再用 0-14 原始名（否则 unknown 会被打印成 Web Attack）
+    label_names = dict(MERGED_LABEL_NAMES)
 
     if 'known_accuracy' in results:
-        print(f"\n已知类准确率: {results['known_accuracy']:.4f}")
+        print(f"\n已知类分类准确率: {results['known_accuracy']:.4f}")
+        print(f"已知类留存率(未误拒): {results.get('known_retention', 0):.4f}")
+        print(f"Macro-F1(known): {results.get('macro_f1_known', 0):.4f}")
         for key, val in results.items():
             if key.endswith('_recall') and key.startswith('class_'):
                 c = int(key.replace('class_', '').replace('_recall', ''))
@@ -453,7 +473,16 @@ def print_open_set_results(results):
                 print(f"  {name}({c}) 召回率: {val:.4f}")
 
     if 'unknown_recall' in results:
-        print(f"\n未知类召回率: {results['unknown_recall']:.4f}")
+        print(f"\n未知类召回率(混合): {results['unknown_recall']:.4f}")
+        if results.get('unknown_origin_available'):
+            _g = results.get('unknown_recall_genuine')
+            _s = results.get('unknown_recall_simulated')
+            _g_txt = "N/A" if _g is None else f"{_g:.4f}"
+            _s_txt = "N/A" if _s is None else f"{_s:.4f}"
+            print(f"  - 真实 OOD 召回: {_g_txt}")
+            print(f"  - 模拟 unknown 召回: {_s_txt}")
+        else:
+            print("  ⚠️ 该划分无 unknown_origin 元数据：仅混合口径，禁止当作真实 OOD 能力")
         print(f"未知类F1: {results['unknown_f1']:.4f}")
         print(f"未知类泄漏率: {results['unknown_leak_rate']:.4f}")
 
@@ -517,10 +546,14 @@ def main():
         llm_model_path_or_save_dir=MODEL_PATH,
         save_dir=SAVED_MODEL_PATH
     )
-    
+
+    # 口径唯一真相源：num_classes 从模型配置读取，并断言分类头维度一致
+    num_classes = read_model_num_classes(SAVED_MODEL_PATH)
+    assert_classifier_dim(model, num_classes)
+
     device = model.device
     print(f"模型设备: {device}")
-    print(f"模型配置: use_numeric={model.use_numeric}, use_bert={model.use_bert}, use_llm={model.use_llm}")
+    print(f"模型配置: use_numeric={model.use_numeric}, use_bert={model.use_bert}, use_llm={model.use_llm}, num_classes={num_classes}")
     
     tokenizer = None
     if model.use_llm:
@@ -534,35 +567,58 @@ def main():
                                    dataset_id=args.dataset_id, split_id=args.split_id,
                                    openset=args.openset)
     if test_dataset is None:
-        print("未找到划分后的测试数据，使用完整数据进行测试...")
-        test_dataset = load_real_data(data_dir=os.path.join(PROJECT_ROOT, "processed_data"))
-        if test_dataset is None:
-            print("未找到真实数据，使用模拟数据进行测试...")
-            test_dataset = generate_mock_data(100)
-    
+        # A4：禁止静默回退到全量/模拟数据（会改变评估口径）
+        raise CaliberError(
+            f"未找到指定划分的测试数据（dataset_id={args.dataset_id}, split_id={args.split_id}, "
+            f"openset={args.openset}），禁止回退到全量数据"
+        )
+
     test_samples = len(test_dataset)
     test_labels = [sample['label'] for sample in test_dataset]
-    
+
+    # A1：断言标签空间与模型配置一致
+    split_name = f"split_openset_{args.split_id}" if args.openset else f"split_{args.split_id}"
+    assert_label_space(test_labels, num_classes, allow_unknown=args.openset, split_name=split_name)
+
     print(f"测试样本数: {test_samples}")
     for lbl, cnt in zip(*np.unique(test_labels, return_counts=True)):
         print(f"  - 类{lbl}: {cnt}样本")
-    
+
     print("\n" + "=" * 60)
     print("开始评估...")
     print("=" * 60)
-    
-    results = evaluate_model(model, test_dataset, tokenizer, device)
-    
+
+    if args.openset:
+        results = evaluate_open_set_model(
+            model, test_dataset, tokenizer, device, num_known_classes=num_classes
+        )
+        required = {"known_accuracy", "unknown_recall_genuine", "macro_f1_known"}
+    else:
+        results = evaluate_model(model, test_dataset, tokenizer, device)
+        required = {"accuracy"}
+
+    for k in required:
+        if k not in results:
+            raise CaliberError(f"评估结果缺少字段 {k}，报告不可落盘")
+
     duration_seconds = time.time() - start_time
-    
-    cm = results['confusion_matrix']
-    
-    print_evaluation_results(results)
+
+    print_evaluation_results(results) if not args.openset else print_open_set_results(results)
     print(f"\n测试耗时: {duration_seconds:.2f}秒")
     
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     
     if not args.no_save_report:
+        is_openset = args.openset
+        origin_available = results.get('unknown_origin_available', False)
+        split_name = f"split_openset_{args.split_id}" if is_openset else f"split_{args.split_id}"
+        if is_openset and origin_available:
+            metric_scope = "genuine+simulated"
+        elif is_openset:
+            metric_scope = "mixed-unknown(deprecated)"
+        else:
+            metric_scope = "closed"
+
         report_data = {
             'report_id': get_next_report_id(),
             'timestamp': timestamp,
@@ -571,8 +627,14 @@ def main():
             'llm_model_path': MODEL_PATH,
             'dataset_id': args.dataset_id,
             'split_id': args.split_id,
+            'split_name': split_name,
+            'openset': is_openset,
+            'num_classes': num_classes,
+            'label_space': list(range(num_classes)),
+            'unknown_label': num_classes if is_openset else None,
+            'unknown_origin_available': origin_available,
+            'metric_scope': metric_scope,
             'test_samples': test_samples,
-            'num_classes': len(set(test_labels)),
             'accuracy': results['accuracy'],
             'precision': results['precision'],
             'recall': results['recall'],
@@ -595,7 +657,19 @@ def main():
             'llm_use_lora': getattr(model, 'llm_use_lora', None),
             'trainable_params': trainable_params
         }
-        
+
+        if is_openset:
+            report_data['known_accuracy'] = results.get('known_accuracy')
+            report_data['known_retention'] = results.get('known_retention')
+            report_data['unknown_recall_genuine'] = results.get('unknown_recall_genuine')
+            report_data['unknown_recall_simulated'] = results.get('unknown_recall_simulated')
+            report_data['macro_f1_known'] = results.get('macro_f1_known')
+            report_data['macro_f1_open'] = results.get('macro_f1_open')
+            report_data['accuracy_open'] = results.get('accuracy_open')
+
+        # C：报告落盘前校验口径字段
+        validate_report(report_data)
+
         report_id = save_test_report(report_data)
         
         print(f"\n测试报告已保存:")

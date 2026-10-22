@@ -22,6 +22,7 @@ from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.model_architectures.ood_head import OODHead
 from src.data.data_loader import load_split_data, collate_fn
 from utils.log_utils import save_log
+from utils.caliber import CaliberError
 
 # P0-1: 固定种子，确保 eval 可复现（ood_head 已去扰动）
 torch.manual_seed(42)
@@ -93,11 +94,37 @@ def _compute_auroc(y_true, y_score):
     return float((pair_gt + 0.5 * pair_eq) / (n_pos * n_neg))
 
 
+def _compute_fpr_at_95_recall(y_true, y_score):
+    """计算在 95% True Positive Rate（unknown 召回）下的 False Positive Rate。
+
+    positive = unknown (y_true==1)；分数越大越可能是 unknown。
+    返回 None 当无 positive 或無 negative 样本。
+    """
+    y_true = np.array(y_true, dtype=int)
+    y_score = np.array(y_score, dtype=float)
+    pos_scores = y_score[y_true == 1]
+    neg_scores = y_score[y_true == 0]
+    n_pos, n_neg = len(pos_scores), len(neg_scores)
+    if n_pos == 0 or n_neg == 0:
+        return None
+
+    # 遍历候选阈值（降序分数），找到 TPR 首次 >= 0.95 处对应的 FPR
+    thresholds = np.sort(np.unique(y_score))[::-1]
+    for th in thresholds:
+        tp = np.sum(pos_scores >= th)
+        fp = np.sum(neg_scores >= th)
+        tpr = tp / n_pos
+        if tpr >= 0.95:
+            return float(fp / n_neg)
+    # 最宽松阈值仍达不到 95% 召回时，返回最后一个阈值的 FPR
+    return float(np.sum(neg_scores >= thresholds[-1]) / n_neg)
+
+
 def run_ood_routing(
     backbone_model_id=None,
     ood_id=None,
     llm_model_id=None,
-    dataset_id=1,
+    dataset_id=0,
     split_id=0,
     model_path=None,
     backbone_variant="A3",
@@ -141,6 +168,13 @@ def run_ood_routing(
 
     if model_path is None:
         model_path = os.path.join(PROJECT_ROOT, "models", "qwen2.5-1.5b")
+
+    # E1：数据集目录不存在不得靠猜，直接报错
+    candidate_data_dir = os.path.join(PROJECT_ROOT, "split_data", f"dataset_{dataset_id}")
+    if not os.path.exists(candidate_data_dir):
+        raise CaliberError(
+            f"dataset_{dataset_id} 不存在，禁止使用脚本默认值，请显式传 --dataset_id"
+        )
 
     # ========== 1. 加载A3 Backbone ==========
     if verbose:
@@ -234,8 +268,40 @@ def run_ood_routing(
     all_labels = np.array([s['label'] for s in test_dataset])
     label_counts = {int(k): int(v) for k, v in zip(*np.unique(all_labels, return_counts=True))}
 
+    # unknown_origin 透传：-1 表示旧划分（来源未知），绝不能当成"真实 OOD 召回 = 0"
+    test_origins = (
+        np.array([int(s.get('unknown_origin', -1)) for s in test_dataset])
+        if len(test_dataset) > 0 and 'unknown_origin' in test_dataset[0] else None
+    )
+    origin_available = bool(test_origins is not None and np.any(test_origins >= 1))
+
+    # E2：阈值校准集(val) 与评估集(test) 的 unknown 构成必须同源，否则阈值不可迁移
+    _split_dir_name = (f"split_fewshot_{fewshot_k}_{split_id}"
+                       if fewshot_k is not None else f"split_openset_{split_id}")
+    _val_npz = os.path.join(
+        PROJECT_ROOT, "split_data", f"dataset_{dataset_id}", _split_dir_name, "val.npz"
+    )
+    if os.path.exists(_val_npz) and origin_available:
+        with np.load(_val_npz) as _vd:
+            if 'unknown_origin' in _vd:
+                _val_origin = np.asarray(_vd['unknown_origin'])
+                _val_sim = int(np.sum(_val_origin == 2))
+                _test_sim = int(np.sum(test_origins == 2))
+                _mixed_declared = bool(
+                    'unknown_calibration_mixed' in _vd
+                    and int(np.asarray(_vd['unknown_calibration_mixed']).ravel()[0]) == 1
+                )
+                if (_val_sim > 0) != (_test_sim > 0) and not _mixed_declared:
+                    raise CaliberError(
+                        f"校准集与评估集的 unknown 构成不同（val 模拟 unknown={_val_sim}, "
+                        f"test 模拟 unknown={_test_sim}），阈值不可迁移；"
+                        f"请重新生成划分使 val/test 同源，"
+                        f"或用 --allow_mixed_calibration 声明混合校准"
+                    )
+
     if verbose:
         print(f"  - 测试样本数: {len(test_dataset)}")
+        print(f"  - unknown_origin 可用: {origin_available}")
         for lbl, cnt in label_counts.items():
             print(f"    {LABEL_NAMES.get(lbl, str(lbl))}({lbl}): {cnt}")
 
@@ -370,6 +436,11 @@ def run_ood_routing(
     # OOD head 分数：越大越可能是 unknown
     y_true_ood = (true_labels_arr >= num_known_classes).astype(int)  # 1=unknown, 0=known
     auroc_ood = _compute_auroc(y_true_ood, np.array(all_ood_scores))
+    fpr_at_95 = _compute_fpr_at_95_recall(y_true_ood, np.array(all_ood_scores))
+
+    # E3：必须给出阈值无关指标，禁止只报固定阈值结果
+    if not np.isfinite(auroc_ood):
+        raise CaliberError("无法计算 AUROC（正/负样本不足），禁止只报固定阈值结果")
 
     # A3基线评估（闭集：只看已知类）
     if compare_baseline:
@@ -393,10 +464,11 @@ def run_ood_routing(
         else:
             a3_unknown_leak = 0.0
 
-    # OOD路由评估（开集）
+    # OOD路由评估（开集）：传 origin 用于按来源拆分 unknown_recall
     routed_results = evaluate_open_set(
         true_labels_arr, routed_pred_arr, num_known_classes,
-        label_names=LABEL_NAMES  # B8：传自定义标签名（含 "unknown" 条目）
+        label_names=LABEL_NAMES,  # B8：传自定义标签名（含 "unknown" 条目）
+        origin=test_origins,
     )
 
     # P0-3: 一致性断言（文档 §5 验收标准）
@@ -417,12 +489,20 @@ def run_ood_routing(
         print(f"\n--- OOD路由 (开集) ---")
         # P0-3: AUROC 作为首报主指标
         print(f"  ★ AUROC (主指标, 阈值无关): {auroc_ood:.4f}")
+        if fpr_at_95 is not None:
+            print(f"  ★ FPR@95TPR: {fpr_at_95:.4f}")
         print(f"  未知类F1: {routed_results['unknown_f1']:.4f}")
-        print(f"  未知类召回率: {routed_results['unknown_recall']:.4f}")
+        print(f"  未知类召回率(混合): {routed_results['unknown_recall']:.4f}")
+        _g = routed_results.get('unknown_recall_genuine')
+        _s = routed_results.get('unknown_recall_simulated')
+        _g_txt = "N/A" if _g is None else f"{_g:.4f}"
+        _s_txt = "N/A" if _s is None else f"{_s:.4f}"
+        print(f"     - 真实OOD召回: {_g_txt}")
+        print(f"     - 模拟unknown召回: {_s_txt}")
         print(f"  未知类泄漏率: {routed_results['unknown_leak_rate']:.4f}")
-        print(f"  已知类准确率: {routed_results.get('known_accuracy', 0):.4f}")
+        print(f"  已知类分类准确率: {routed_results.get('known_accuracy', 0):.4f}  (known_retention 留存率: {routed_results.get('known_retention', 0):.4f})")
         print(f"  整体准确率: {routed_results['accuracy']:.4f}")
-        print(f"  Macro-F1: {routed_results['macro_f1']:.4f}")
+        print(f"  Macro-F1(known): {routed_results.get('macro_f1_known', 0):.4f}  Macro-F1(open): {routed_results['macro_f1']:.4f}")
 
         print(f"\n  --- 各类表现 ---")
         for c in range(num_known_classes):
@@ -455,12 +535,20 @@ def run_ood_routing(
         'total_test': len(all_labels_collected),
         'routed': {
             'auroc': auroc_ood,  # P0-3: 主指标
+            'fpr_at_95tpr': fpr_at_95,
             'accuracy': routed_results['accuracy'],
+            'accuracy_open': routed_results.get('accuracy_open', routed_results['accuracy']),
             'macro_f1': routed_results['macro_f1'],
+            'macro_f1_known': routed_results.get('macro_f1_known', 0),
+            'macro_f1_open': routed_results.get('macro_f1_open', routed_results['macro_f1']),
             'unknown_recall': routed_results['unknown_recall'],
+            'unknown_recall_genuine': routed_results.get('unknown_recall_genuine'),
+            'unknown_recall_simulated': routed_results.get('unknown_recall_simulated'),
             'unknown_f1': routed_results['unknown_f1'],
             'unknown_leak_rate': routed_results['unknown_leak_rate'],
             'known_accuracy': routed_results.get('known_accuracy', 0),
+            'known_retention': routed_results.get('known_retention', 0),
+            'unknown_origin_available': origin_available,
             'num_known_routed': routed_results['num_known_routed'],
             'num_unknown_routed': routed_results['num_unknown_routed'],
             'per_class': {
@@ -506,10 +594,16 @@ def run_ood_routing(
         'llm_model_id': llm_model_id,
         'total_test': len(all_labels_collected),
         'auroc': auroc_ood,  # P0-3: 主指标
+        'fpr_at_95tpr': fpr_at_95,
         'unknown_f1': routed_results['unknown_f1'],
         'unknown_recall': routed_results['unknown_recall'],
+        'unknown_recall_genuine': routed_results.get('unknown_recall_genuine'),
+        'unknown_recall_simulated': routed_results.get('unknown_recall_simulated'),
         'unknown_leak_rate': routed_results['unknown_leak_rate'],
         'macro_f1': routed_results['macro_f1'],
+        'known_accuracy': routed_results.get('known_accuracy', 0),
+        'known_retention': routed_results.get('known_retention', 0),
+        'unknown_origin_available': origin_available,
         'duration_seconds': round(duration_seconds, 3)
     }
 
@@ -552,8 +646,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--llm_model_id", type=_optional_int, default=None,
                         help="A0 LLM模型ID（可选，不写或写 None 即跳过）")
-    parser.add_argument("--dataset_id", type=int, default=1,
-                        help="数据集ID（默认1）")
+    parser.add_argument("--dataset_id", type=int, default=0,
+                        help="数据集ID（默认0）")
     parser.add_argument("--split_id", type=int, default=0,
                         help="划分ID（对应split_openset_{id}）")
     parser.add_argument("--model_path", type=str, default=None,

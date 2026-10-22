@@ -153,7 +153,7 @@ def generate_experiment_summary(output_dir=None):
 
             # 各类召回
             'routed_benign_recall': routed.get('per_class', {}).get('BENIGN', {}).get('recall', ''),
-            'routed_known_ddos_recall': routed.get('per_class', {}).get('known_DDoS', {}).get('recall', ''),
+            'routed_known_ddos_recall': routed.get('per_class', {}).get('DDoS', {}).get('recall', ''),
 
             # A3基线指标
             'a3_known_accuracy': a3_baseline.get('known_accuracy', ''),
@@ -348,7 +348,7 @@ def generate_markdown_summary(routing_reports, ood_logs, openset_logs, fewshot_l
         for r in routing_reports:
             per_class = r.get('routed', {}).get('per_class', {})
             benign_recalls.append(per_class.get('BENIGN', {}).get('recall', 0))
-            known_ddos_recalls.append(per_class.get('known_DDoS', {}).get('recall', 0))
+            known_ddos_recalls.append(per_class.get('DDoS', {}).get('recall', 0))
 
         lines.append("| 类别 | 召回率 | F1 |")
         lines.append("|------|:------:|:--:|")

@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 from src.model_architectures.multi_modal_model import MultiModalFusionModel, FocalLoss
 from src.data.data_loader import generate_mock_data, load_real_data, load_split_data, collate_fn
 from utils.log_utils import save_log
+from utils.caliber import CaliberError, assert_label_space
 
 
 def augmentation_collate_fn(batch, tokenizer=None, max_length=128,
@@ -570,6 +571,15 @@ def train_model(model_path=None,
         all_labels = [s['label'] for s in train_dataset]
         num_classes = max(all_labels) + 1
         print(f"自动检测类别数: {num_classes}")
+    else:
+        # 显式传入时校验：与训练集推导一致，禁止评估用了不同类数
+        actual = max([s['label'] for s in train_dataset]) + 1
+        if actual != num_classes:
+            raise CaliberError(f"传入 num_classes={num_classes} 与训练集推导 {actual} 不一致")
+
+    # fail-fast：训练集不应出现 unknown 标签（known-only）
+    train_labels_arr = [s['label'] for s in train_dataset]
+    assert_label_space(train_labels_arr, num_classes, allow_unknown=False, split_name="train")
     
     val_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="val",
                                   dataset_id=dataset_id, split_id=split_id, openset=openset)
@@ -592,7 +602,7 @@ def train_model(model_path=None,
         if n_filtered > 0:
             print(f"检测到 {n_filtered} 个 label >= num_classes({num_classes}) 的验证样本（可能是 openset unknown），将过滤...")
             val_dataset = val_dataset.select(np.where(valid_mask)[0].tolist())
-            print(f"过滤后验证集: {n_valid} 样本")
+            print(f"过滤后验证集: {n_valid} 样本 (known-only 评估，n={n_valid})")
 
     # 计算类别权重（用于加权损失函数）
     class_weights = None
