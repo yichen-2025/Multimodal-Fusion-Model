@@ -395,3 +395,6 @@ python -m pytest tests/test_project.py -v
 7. **少样本学习**：在少量训练样本（k=5/10/20）下验证模型泛化能力
 
 模型架构参考 `原理图.png`，数据处理流程参考 `数据集处理流程图.png`。
+## 生成物台账
+
+`saved_models/`、`saved_ood_heads/`、`test_reports/`、`ood_reports/` 中哪些产物有效、哪些仅为历史证据，统一以 [artifacts/README.md](artifacts/README.md) 与 `artifacts/ledger.csv` 为准。审查代码或引用历史指标前请先读台账。
