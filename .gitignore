@@ -30,6 +30,7 @@ ood_reports/
 saved_ood_heads/
 saved_ood_models/
 ood_multiseed_results/
+explanation_results/
 
 # 操作系统文件
 .DS_Store
@@ -46,6 +47,7 @@ venv/
 *.tmp
 *.temp
 *~
+*.bak
 
 # IDE配置
 # Jupyter checkpoints
