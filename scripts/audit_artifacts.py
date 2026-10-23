@@ -271,13 +271,17 @@ def collect():
     for key, rids in sorted(signature.items(), key=lambda kv: str(kv[0])):
         if len(rids) < 2:
             continue
-        rids = sorted(rids)
+        # 口径相同时以时间最新的一次为准：修复口径后的重跑应覆盖旧结果
+        rids = sorted(rids, key=lambda r: reports[r].get("timestamp") or "",
+                      reverse=True)
+        canonical = rids[0]
         for rid in rids[1:]:
             if report_status.get(rid) == "active":
                 report_status[rid] = "deprecated"
-                report_reason[rid] = ("与 report_%s 同模型/同划分/同样本数，重复运行"
-                                      % rids[0])
-                report_super[rid] = "report_%s" % rids[0]
+                report_reason[rid] = ("与 report_%s 同模型/同划分/同样本数，"
+                                      "重复运行（以较新一次为准）；旧报告口径可能不同"
+                                      % canonical)
+                report_super[rid] = "report_%s" % canonical
 
     active_models = {int(reports[rid]["model_id"]) for rid in reports
                      if report_status.get(rid) == "active"}
