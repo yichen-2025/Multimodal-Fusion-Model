@@ -93,12 +93,14 @@ python scripts/run_ablation.py --variants A3 A0* A0_frozen --dataset_id 0 --spli
 ### 7. 构造开集划分
 
 ```bash
-python scripts/make_openset_split.py --dataset_id 0 --source_split_id 0 --simulated_unknown_ratio 0.3
+python scripts/make_openset_split.py --dataset_id 0 --source_split_id 0 --simulated_unknown_ratio 0.1 --val_unknown_count 50 --allow_mixed_calibration
 ```
 
 - 参数：
   - `--dataset_id`、`--source_split_id`、`--output_split_id`（默认自动递增）。
   - `--simulated_unknown_ratio`：模拟未知类比例（**注意参数名，不是 `--unknown_ratio`**）。
+  - `--val_unknown_count`：val 中保留的真实 hold-out unknown 数量（默认 50，其余移入 test；改动会改变 val/test 组成）。
+  - `--allow_mixed_calibration`：val 只有真实 OOD、test 含模拟 unknown 时必须显式声明，否则 B2 会报错。
   - `--hold_out_classes`：完全留出的类别 ID 列表（如 `10 11`）。
   - `--no_default_holdout`：不使用默认留出类。
 - 产物：`split_data/dataset_<id>/split_openset_<id>/`。

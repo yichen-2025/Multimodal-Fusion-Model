@@ -100,6 +100,7 @@ def make_openset_split(dataset_id=0,
                        hold_out_classes=None,
                        simulated_unknown_ratio=0.1,
                        allow_mixed_calibration=False,
+                       val_unknown_count=50,
                        random_state=42,
                        use_default_holdout=True):
     """
@@ -232,10 +233,12 @@ def make_openset_split(dataset_id=0,
     val_keep_mask = np.isin(val_labels, known_classes)
     val_keep_idx = np.where(val_keep_mask)[0]
 
-    # 从源 val 的 hold-out 样本中抽 ~20 个保留在新 val（作为真实 unknown）
+    # 从源 val 的 hold-out 样本中抽 val_unknown_count 个保留在新 val（作为真实 unknown）
     # 剩余的源 val hold-out → 移到 test 作为额外 OOD 样本
+    if val_unknown_count < 0:
+        raise ValueError(f'val_unknown_count 必须 >= 0，当前为 {val_unknown_count}')
     val_holdout_idx_all = np.where(np.isin(val_labels, hold_out_classes))[0]
-    n_val_unknown = min(20, len(val_holdout_idx_all))
+    n_val_unknown = min(val_unknown_count, len(val_holdout_idx_all))
     if n_val_unknown > 0:
         rng_val = np.random.RandomState(random_state + 1)  # 独立种子
         val_unknown_idx = rng_val.choice(val_holdout_idx_all, size=n_val_unknown, replace=False)
@@ -562,6 +565,7 @@ def make_openset_split(dataset_id=0,
         'num_known_classes': num_known_classes,
         'unknown_label': unknown_label,
         'simulated_unknown_ratio': simulated_unknown_ratio,
+        'val_unknown_count': val_unknown_count,
         'random_state': random_state,
         'train_total': len(new_train_labels),
         'val_total': len(new_val_labels),
@@ -604,6 +608,8 @@ if __name__ == "__main__":
                         help="测试集中已知非BENIGN样本改为模拟unknown的比例（默认0.1，设为0关闭）")
     parser.add_argument("--allow_mixed_calibration", action="store_true",
                         help="允许 val/test 的 unknown 构成不同（阈值校准与评估混合口径）")
+    parser.add_argument("--val_unknown_count", type=int, default=50,
+                        help="val 中保留的真实 hold-out unknown 数量（默认50，其余移入 test）")
     parser.add_argument("--no_default_holdout", action="store_true",
                         help="关闭默认留出集（需要手动指定 --hold_out_classes）")
     parser.add_argument("--random_state", type=int, default=42, help="随机种子（默认42）")
@@ -616,6 +622,7 @@ if __name__ == "__main__":
         hold_out_classes=args.hold_out_classes,
         simulated_unknown_ratio=args.simulated_unknown_ratio,
         allow_mixed_calibration=args.allow_mixed_calibration,
+        val_unknown_count=args.val_unknown_count,
         random_state=args.random_state,
         use_default_holdout=not args.no_default_holdout,
     )
