@@ -456,12 +456,35 @@ def collect():
                     "archive_path": "", "updated_at": now,
                 })
 
-    # ---- 台账行：解释结果（抽样口径不一致，只标注）
+    # ---- 台账行：解释结果（按 config.sampling 判定；随机抽样分母不可对齐全量）
     for path in sorted(glob.glob(os.path.join(EXPL_DIR, "*.json"))):
+        name = os.path.basename(path)
+        if name.startswith("eval_"):
+            rows.append({
+                "kind": "explanation_eval", "id": name, "path": relpath(path),
+                "status": "active",
+                "reason": "eval_explanations.py 生成的指标明细，不参与抽样口径判定",
+                "superseded_by": "", "num_classes": "", "split_name": "",
+                "size_bytes": dirsize(path), "digest": digest(path),
+                "archive_path": "", "updated_at": now,
+            })
+            continue
+        sampling = ""
+        try:
+            with open(path, encoding="utf-8") as f:
+                sampling = (json.load(f).get("config") or {}).get("sampling", "")
+        except Exception:
+            sampling = ""
+        if sampling == "stratified":
+            status = "active"
+            reason = ("按类比例分层抽样，各类配额记录在 config.per_class_sample_counts，"
+                      "分母可对齐全量")
+        else:
+            status = "deprecated"
+            reason = "随机抽样（未分层），各类样本数不稳定，分母不可与全量对齐"
         rows.append({
-            "kind": "explanation", "id": os.path.basename(path), "path": relpath(path),
-            "status": "deprecated",
-            "reason": "非分层抽样且 CLI 默认 n_samples=100，分母与全量不一致",
+            "kind": "explanation", "id": name, "path": relpath(path),
+            "status": status, "reason": reason,
             "superseded_by": "", "num_classes": "", "split_name": "",
             "size_bytes": dirsize(path), "digest": digest(path),
             "archive_path": "", "updated_at": now,

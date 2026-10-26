@@ -16,6 +16,7 @@ import re
 import json
 import time
 import argparse
+from collections import Counter
 from typing import Dict, List, Optional, Any, Tuple
 
 import torch
@@ -27,6 +28,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.explain.attack_mapping import (
+    TECHNIQUE_BEHAVIOR,
     get_label_name,
     get_all_mitre_techniques,
     get_true_mitre_ids,
@@ -46,7 +48,8 @@ SYSTEM_PROMPT = """你是一名网络安全分析专家，擅长分析网络流�
 1. 解释要具体引用流量特征中的关键字段（如端口、包长度、标志位等）
 2. 解释要说明"为什么这些特征表明是该攻击类型"
 3. 若预测类别为 BENIGN（正常流量），mitre_technique_id 必须为 null，解释应说明该流量为何是正常的
-4. 若预测类别为攻击类，MITRE ATT&CK 编号必须从候选列表中选择，不要编造
+4. 若预测类别为攻击类，MITRE ATT&CK 编号必须从候选列表中选择，不要编造；
+   先判断流量体现的攻击行为模式，再据此选择编号，不要因为某个编号更常见就默认选它
 5. 输出严格为 JSON 格式，包含两个字段：explanation（中文解释）和 mitre_technique_id（ATT&CK 编号，正常流量为 null）"""
 
 
@@ -59,7 +62,11 @@ def build_user_prompt(
     # 候选 ATT&CK 技术列表
     techniques = get_all_mitre_techniques()
     tech_list_str = "\n".join(
-        [f"  - {t['id']}: {t['name']}" for t in techniques]
+        [
+            f"  - {t['id']}: {t['name']}"
+            + (f"（行为特征：{TECHNIQUE_BEHAVIOR[t['id']]}）" if t["id"] in TECHNIQUE_BEHAVIOR else "")
+            for t in techniques
+        ]
     )
 
     prompt = f"""流量文本特征：
@@ -119,12 +126,31 @@ def load_llm_for_generation(llm_model_path: str, device: str = "cuda"):
 
 # ==================== 数据加载 ====================
 
+def _stratified_indices(labels: np.ndarray, n_samples: int, seed: int):
+    """按类比例分层抽样（最大余数法），返回排序后的索引与各类配额。"""
+    total = len(labels)
+    counts = Counter(int(x) for x in labels)
+    quotas = {k: n_samples * c / total for k, c in counts.items()}
+    alloc = {k: int(np.floor(q)) for k, q in quotas.items()}
+    left = n_samples - sum(alloc.values())
+    for k in sorted(quotas, key=lambda k: (-(quotas[k] - alloc[k]), k))[:left]:
+        alloc[k] += 1
+    rng = np.random.RandomState(seed)
+    picked = []
+    for k in sorted(alloc):
+        pool = np.where(labels == k)[0]
+        take = min(alloc[k], len(pool))
+        picked.extend(rng.choice(pool, size=take, replace=False).tolist())
+    return sorted(picked), {k: v for k, v in sorted(alloc.items()) if v}
+
+
 def load_test_samples(
     dataset_id: int = 0,
     split_id: int = 0,
     n_samples: Optional[int] = None,
     seed: int = 42,
     openset: bool = True,
+    sampling: str = "random",
 ) -> List[Dict[str, Any]]:
     """加载测试集样本（支持开集/闭集划分）。
 
@@ -161,10 +187,14 @@ def load_test_samples(
             }
         )
 
-    # 抽样
+    # 抽样：random=全库随机；stratified=按类比例分层（各类配额固定，分母可对齐全量）
     if n_samples is not None and n_samples < len(samples):
-        rng = np.random.RandomState(seed)
-        indices = rng.choice(len(samples), size=n_samples, replace=False)
+        if sampling == "stratified":
+            indices, alloc = _stratified_indices(labels, n_samples, seed)
+            print(f"分层抽样配额（按类比例）：{alloc}")
+        else:
+            rng = np.random.RandomState(seed)
+            indices = rng.choice(len(samples), size=n_samples, replace=False)
         samples = [samples[i] for i in sorted(indices)]
 
     print(f"加载 {len(samples)} 条测试样本（dataset={dataset_id}, {split_name}）")
@@ -334,6 +364,7 @@ def run_explanation_generation(
     device: str = "cuda",
     seed: int = 42,
     openset: bool = True,
+    sampling: str = "random",
 ) -> str:
     """执行完整的解释生成流程。
 
@@ -364,7 +395,9 @@ def run_explanation_generation(
 
     # 2. 加载测试样本
     print(f"\n[2/4] 加载测试样本（n_samples={n_samples}）")
-    samples = load_test_samples(dataset_id, split_id, n_samples, seed, openset=openset)
+    samples = load_test_samples(
+        dataset_id, split_id, n_samples, seed, openset=openset, sampling=sampling
+    )
 
     # 3. backbone 预测
     print(f"\n[3/4] Backbone 批量预测")
@@ -427,6 +460,10 @@ def run_explanation_generation(
                     "num_known_classes": num_known_classes,
                     "llm_model_path": llm_model_path,
                     "seed": seed,
+                    "sampling": sampling,
+                    "per_class_sample_counts": dict(
+                        sorted(Counter(s["label"] for s in samples).items())
+                    ),
                     "timestamp": timestamp,
                 },
                 "results": results,
@@ -497,6 +534,12 @@ def main():
     parser.add_argument("--device", type=str, default="cuda", help="设备")
     parser.add_argument("--seed", type=int, default=42, help="随机种子")
     parser.add_argument(
+        "--sampling",
+        choices=["random", "stratified"],
+        default="random",
+        help="抽样方式：random=全库随机；stratified=按类比例分层",
+    )
+    parser.add_argument(
         "--openset",
         dest="openset",
         action="store_true",
@@ -521,6 +564,7 @@ def main():
         device=args.device,
         seed=args.seed,
         openset=args.openset,
+        sampling=args.sampling,
     )
 
 

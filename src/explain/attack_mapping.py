@@ -47,6 +47,19 @@ ATTACK_TO_MITRE: Dict[int, Optional[Dict[str, str]]] = {
 }
 
 
+# 技术编号 -> 行为特征描述（只描述行为，不绑定类别，供 prompt 候选列表使用，
+# 避免基座 LLM 只看到技术名称时默认选最常见的 DoS 编号）
+TECHNIQUE_BEHAVIOR: Dict[str, str] = {
+    "T1498.001": "以大量并发流量直接淹没目标带宽",
+    "T1498.002": "通过慢速或长连接等方式耗尽服务连接/资源",
+    "T1046": "探测目标主机的开放端口与服务",
+    "T1110.001": "反复尝试猜测口令以获取凭据",
+    "T1071": "使用常见应用层协议进行通信",
+    "T1059.007": "借助脚本/JavaScript 执行命令",
+    "T1190": "利用对外服务的公开漏洞执行攻击",
+}
+
+
 def get_mitre_for_label(label: int) -> Optional[Dict[str, str]]:
     """根据标签获取 MITRE ATT&CK 技术映射。"""
     return ATTACK_TO_MITRE.get(label)
