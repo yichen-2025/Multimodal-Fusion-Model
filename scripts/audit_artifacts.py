@@ -49,6 +49,35 @@ LEDGER_FIELDS = [
     "num_classes", "split_name", "size_bytes", "digest", "archive_path", "updated_at",
 ]
 
+# 主数据集判定：模型数达到阈值的数据集视为主数据集，更少的视为子集/冒烟实验。
+# 旧实现取"模型数最多"的唯一数据集，会把模型更少的新数据集误判为子集，
+# 进而让 audit_artifacts.py --apply 把该数据集的有效模型移入 _archive。
+MAIN_DATASET_MIN_MODELS = 5
+
+# 人工状态覆盖：经复核确认的结论，不随报告引用关系自动判定，保证台账可重建且稳定。
+FORCED_MODEL_STATUS = {
+    2008: ("invalid",
+           "checkpoint 不含 LoRA adapter（state_dict 缺陷），早停恢复不一致，"
+           "闭集 known_acc 0.8508 不可用；非 add 变体不稳定",
+           "model_2012"),
+    2003: ("deprecated",
+           "修复前训练的 concat 模型，checkpoint 不含 LoRA adapter，"
+           "闭集 0.9861 / genuine AUROC 0.8502 有偏，不可作为 OOD 基准",
+           "model_2013"),
+}
+
+# 人工状态覆盖（报告）：backbone 被覆盖为非 active 时，对应报告同步降级，避免台账自相矛盾。
+FORCED_REPORT_STATUS = {
+    29: ("deprecated",
+         "backbone model_2003 为修复前训练（checkpoint 不含 LoRA adapter），"
+         "闭集 0.9861 有偏，结果不可用",
+         "report_37"),
+    35: ("deprecated",
+         "backbone model_2008 的 checkpoint 不含 LoRA adapter（state_dict 缺陷），"
+         "闭集 0.8508 不可用",
+         "report_36"),
+}
+
 
 def relpath(path):
     return os.path.relpath(path, PROJECT_ROOT).replace(os.sep, "/")
@@ -229,7 +258,7 @@ def collect():
     for ds in model_dataset.values():
         if ds is not None:
             ds_counts[ds] = ds_counts.get(ds, 0) + 1
-    canonical_dataset = (max(ds_counts, key=ds_counts.get) if ds_counts else 0)
+    main_datasets = {ds for ds, n in ds_counts.items() if n >= MAIN_DATASET_MIN_MODELS}
 
     # ---- 报告状态：先判无效，再判重复
     report_status, report_reason, report_super = {}, {}, {}
@@ -256,7 +285,7 @@ def collect():
                                   "该报告不可复现") % (d["dataset_id"], d["split_id"])
             continue
         mid_int = int(d["model_id"])
-        if model_dataset.get(mid_int) is not None and model_dataset[mid_int] != canonical_dataset:
+        if model_dataset.get(mid_int) is not None and model_dataset[mid_int] not in main_datasets:
             report_status[rid] = "deprecated"
             report_reason[rid] = ("非主数据集的子集/冒烟实验（dataset_%s，仅 %d 个模型使用），"
                                   "不可作为结论") % (model_dataset[mid_int],
@@ -283,6 +312,12 @@ def collect():
                                       % canonical)
                 report_super[rid] = "report_%s" % canonical
 
+    for rid, (f_status, f_reason, f_super) in FORCED_REPORT_STATUS.items():
+        if rid in reports:
+            report_status[rid] = f_status
+            report_reason[rid] = f_reason
+            report_super[rid] = f_super
+
     active_models = {int(reports[rid]["model_id"]) for rid in reports
                      if report_status.get(rid) == "active"}
     invalid_models = {int(reports[rid]["model_id"]) for rid in reports
@@ -307,7 +342,11 @@ def collect():
             ood_reason[name] = "引用的开集划分不存在"
             continue
         test_npz = os.path.join(split, "test.npz")
-        if "unknown_origin" not in npz_keys(test_npz):
+        if int(mid) in invalid_models or int(mid) not in active_models:
+            ood_status[name] = "deprecated"
+            ood_reason[name] = ("backbone model_%s 已被台账标为非 active（结果有偏/无效），"
+                                "该报告随 backbone 降级" % mid)
+        elif "unknown_origin" not in npz_keys(test_npz):
             ood_status[name] = "deprecated"
             ood_reason[name] = ("旧划分缺少 unknown_origin，指标为“真实 OOD + 模拟 "
                                 "unknown”混合口径，不能当作真实 OOD 能力")
@@ -335,19 +374,22 @@ def collect():
 
     # ---- 台账行：模型
     for mid, info in sorted(models.items()):
-        if mid in active_models:
-            status, reason = "active", "被有效报告引用"
+        forced = FORCED_MODEL_STATUS.get(mid)
+        if forced is not None:
+            status, reason, super_by = forced
+        elif mid in active_models:
+            status, reason, super_by = "active", "被有效报告引用", ""
         elif mid in invalid_models:
-            status, reason = "invalid", "仅被无效报告引用（其划分不存在）"
-        elif info["dataset_id"] is not None and info["dataset_id"] != canonical_dataset:
-            status, reason = "deprecated", ("非主数据集 dataset_%s 的子集/冒烟实验（accuracy "
-                                            "近似随机），不可作为结论") % info["dataset_id"]
+            status, reason, super_by = "invalid", "仅被无效报告引用（其划分不存在）", ""
+        elif info["dataset_id"] is not None and info["dataset_id"] not in main_datasets:
+            status, reason, super_by = "deprecated", ("非主数据集 dataset_%s 的子集/冒烟实验"
+                                            "（accuracy 近似随机），不可作为结论") % info["dataset_id"], ""
         else:
-            status, reason = "deprecated", "未被任何有效报告引用，仅属历史实验或旧口径 ood_reports"
+            status, reason, super_by = "deprecated", "未被任何有效报告引用，仅属历史实验或旧口径 ood_reports", ""
         entry = info["entry"]
         rows.append({
             "kind": "model", "id": "model_%d" % mid, "path": relpath(entry["logical"]),
-            "status": status, "reason": reason, "superseded_by": "",
+            "status": status, "reason": reason, "superseded_by": super_by,
             "num_classes": info["num_classes"] if info["num_classes"] is not None else "",
             "split_name": "", "size_bytes": dirsize(entry["real"]),
             "digest": digest(entry["real"]),
