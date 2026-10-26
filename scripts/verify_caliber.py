@@ -3,6 +3,7 @@
 对 test_reports/ 下的评估报告与 reports_index.csv 做 fail-fast 校验：
 1. reports_index.csv 列 schema 是否完整（assert_index_schema）；
 2. 每个报告 JSON 是否含口径字段（split_name / num_classes / openset 等）；
+   口径修复前生成的 legacy 报告（缺 label_space 与 metric_scope）只告警，不硬失败；
 3. open-set 报告是否含 unknown_recall_genuine；
 4. 报告 num_classes 是否与模型 config.txt 一致；
 5. reports_index.csv 是否出现同模型同划分同配置的重复行（警告）。
@@ -28,6 +29,11 @@ from utils.caliber import (
     assert_index_schema,
     read_model_num_classes,
 )
+
+# 口径修复后新增的两个字段。两者同时缺失 => 该报告由修复前的 test_model 生成，
+# 属 legacy 报告：只告警跳过，避免历史文件让整个校验永久退出码非 0。
+# 只要出现"部分缺失"（只缺其中一个或只缺部分字段），仍按硬错误处理，防止新报告漏字段。
+LEGACY_MARKERS = ("label_space", "metric_scope")
 
 
 def main():
@@ -59,11 +65,19 @@ def main():
             continue
 
         missing = REQUIRED_REPORT_FIELDS - set(rep)
+        is_legacy = all(k not in rep for k in LEGACY_MARKERS)
         if missing:
-            errors.append(f"{rname}: 缺少口径字段 {sorted(missing)}")
-            continue
+            if is_legacy:
+                warnings.append(
+                    f"{rname}: 旧口径(legacy)报告，缺 {sorted(missing)}，"
+                    f"跳过全部口径校验；如需纳入结论请用当前 test_model 重跑"
+                )
+                continue
+            else:
+                errors.append(f"{rname}: 缺少口径字段 {sorted(missing)}")
+                continue
 
-        if rep.get("openset") and "unknown_recall_genuine" not in rep:
+        if not is_legacy and rep.get("openset") and "unknown_recall_genuine" not in rep:
             errors.append(f"{rname}: open-set 报告缺少 unknown_recall_genuine")
 
         mid = rep.get("model_id")
