@@ -5,6 +5,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from .numeric_encoder import NumericEncoder
 from .bert_encoder import BertEncoder
 from .fusion_projection import FeatureFusionProjection
+from utils.flow_features import TEXT_MAX_LENGTH
 
 
 class FocalLoss(nn.Module):
@@ -56,6 +57,17 @@ class FocalLoss(nn.Module):
             focal_loss = -focal_weight * log_pt
         
         return focal_loss.mean()
+
+
+def _require_numeric_input_dim(config, config_path):
+    """数值编码器维度必须来自模型配置，禁止回落到默认 9 维。"""
+    value = config.get('numeric_input_dim', None)
+    if value is None:
+        raise ValueError(
+            f"模型配置缺少 numeric_input_dim: {config_path}；"
+            f"禁止按默认 9 维加载，请用新代码重新训练"
+        )
+    return int(value)
 
 
 class MultiModalFusionModel(nn.Module):
@@ -487,7 +499,7 @@ class MultiModalFusionModel(nn.Module):
         if self.use_llm and tokenizer is not None:
             if text is None:
                 text = ''  # fallback
-            inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128).to(self.device)
+            inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=TEXT_MAX_LENGTH).to(self.device)
             input_ids = inputs.input_ids
             attention_mask = inputs.attention_mask
 
@@ -569,9 +581,12 @@ class MultiModalFusionModel(nn.Module):
         使用 requires_grad 判断（适配 peft 包装后 key 前缀变化）
         """
         full_state = super().state_dict(*args, **kwargs)
+        # state_dict(keep_vars=False) 返回 detach 后的张量，requires_grad 恒为 False；
+        # 必须按参数名筛选，否则 LoRA adapter 会被当成冻结参数漏掉（checkpoint 不含 adapter）。
+        trainable_names = {n for n, p in self.named_parameters() if p.requires_grad}
         trainable_state = {
             k: v for k, v in full_state.items()
-            if v.requires_grad
+            if k in trainable_names
         }
         # 如果全冻结（包括 LoRA 关闭），fallback 到旧的前缀过滤
         if len(trainable_state) == 0:
@@ -588,10 +603,11 @@ class MultiModalFusionModel(nn.Module):
         """
         filtered_state_dict = {}
         for k, v in state_dict.items():
-            # 排除冻结的 LLM 底座参数和 BERT 参数
-            if k.startswith('llm.') or k.startswith('bert_encoder.'):
+            # 只排除冻结的 LLM 底座参数与 BERT 参数；LoRA adapter 必须保留，
+            # 否则 load_best_model_at_end 无法把 adapter 一并恢复到最优轮次。
+            if k.startswith('llm.') and 'lora_' not in k:
                 continue
-            if 'base_model.model.llm' in k and 'lora_' not in k:
+            if k.startswith('bert_encoder.'):
                 continue
             filtered_state_dict[k] = v
         return super().load_state_dict(filtered_state_dict, *args, **kwargs)
@@ -747,7 +763,7 @@ class MultiModalFusionModel(nn.Module):
         model = cls(
             llm_model_path=llm_model_path,
             bert_model_path=config.get('bert_model_path', './models/bert'),
-            numeric_input_dim=config.get('numeric_input_dim', 9),
+            numeric_input_dim=_require_numeric_input_dim(config, config_path),
             numeric_hidden_dim=config.get('numeric_hidden_dim', 128),
             numeric_output_dim=config.get('numeric_output_dim', 128),
             use_numeric=config.get('use_numeric', True),

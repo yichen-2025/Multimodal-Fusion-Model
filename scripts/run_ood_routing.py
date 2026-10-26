@@ -120,6 +120,43 @@ def _compute_fpr_at_95_recall(y_true, y_score):
     return float(np.sum(neg_scores >= thresholds[-1]) / n_neg)
 
 
+def _compute_auroc_by_origin(y_score, origin, code):
+    """known(origin=0) vs 指定来源 unknown(origin=code) 的 AUROC。
+
+    origin 不可用、或任一组为空时返回 None；禁止用 0 冒充"没有 OOD 能力"。
+    """
+    if origin is None:
+        return None
+    y_score = np.asarray(y_score, dtype=float)
+    origin = np.asarray(origin, dtype=int)
+    known = origin == 0
+    target = origin == code
+    if int(known.sum()) == 0 or int(target.sum()) == 0:
+        return None
+    mask = known | target
+    return _compute_auroc(target[mask].astype(int), y_score[mask])
+
+
+def _compute_tpr_at_fpr(y_true, y_score, target_fpr):
+    """FPR <= target_fpr 约束下可达的最大 TPR（分数越大越可能是 unknown）。"""
+    y_true = np.asarray(y_true, dtype=int)
+    y_score = np.asarray(y_score, dtype=float)
+    pos_scores = y_score[y_true == 1]
+    neg_scores = y_score[y_true == 0]
+    n_pos, n_neg = len(pos_scores), len(neg_scores)
+    if n_pos == 0 or n_neg == 0:
+        return None
+
+    best_tpr = 0.0
+    for th in np.sort(np.unique(y_score))[::-1]:
+        if np.sum(neg_scores >= th) / n_neg > target_fpr:
+            continue
+        tpr = float(np.sum(pos_scores >= th) / n_pos)
+        if tpr > best_tpr:
+            best_tpr = tpr
+    return best_tpr
+
+
 def run_ood_routing(
     backbone_model_id=None,
     ood_id=None,
@@ -438,6 +475,18 @@ def run_ood_routing(
     auroc_ood = _compute_auroc(y_true_ood, np.array(all_ood_scores))
     fpr_at_95 = _compute_fpr_at_95_recall(y_true_ood, np.array(all_ood_scores))
 
+    # 阶段 1 新增：按 origin 拆分 AUROC + 低 FPR 操作点（均为阈值无关指标）
+    auroc_genuine = _compute_auroc_by_origin(all_ood_scores, test_origins, 1)
+    auroc_simulated = _compute_auroc_by_origin(all_ood_scores, test_origins, 2)
+    tpr_at_fpr_1 = _compute_tpr_at_fpr(y_true_ood, np.array(all_ood_scores), 0.01)
+    tpr_at_fpr_5 = _compute_tpr_at_fpr(y_true_ood, np.array(all_ood_scores), 0.05)
+
+    # origin 可用时 genuine AUROC 必须可算；出现 None/NaN 说明数据异常，禁止静默写 0
+    if origin_available and not (auroc_genuine is not None and np.isfinite(auroc_genuine)):
+        raise CaliberError("unknown_origin 可用但 genuine AUROC 无法计算，禁止用 0/None 掩盖")
+    if origin_available and int(np.sum(test_origins == 2)) > 0 and auroc_simulated is None:
+        raise CaliberError("存在 simulated unknown 但 simulated AUROC 为 None")
+
     # E3：必须给出阈值无关指标，禁止只报固定阈值结果
     if not np.isfinite(auroc_ood):
         raise CaliberError("无法计算 AUROC（正/负样本不足），禁止只报固定阈值结果")
@@ -491,6 +540,16 @@ def run_ood_routing(
         print(f"  ★ AUROC (主指标, 阈值无关): {auroc_ood:.4f}")
         if fpr_at_95 is not None:
             print(f"  ★ FPR@95TPR: {fpr_at_95:.4f}")
+        if auroc_genuine is not None:
+            print(f"  ★ AUROC (genuine: origin=1 vs known): {auroc_genuine:.4f}")
+        else:
+            print("  ★ AUROC (genuine): N/A（unknown_origin 不可用）")
+        if auroc_simulated is not None:
+            print(f"  ★ AUROC (simulated: origin=2 vs known): {auroc_simulated:.4f}")
+        if tpr_at_fpr_1 is not None:
+            print(f"  ★ TPR@FPR<=1%: {tpr_at_fpr_1:.4f}")
+        if tpr_at_fpr_5 is not None:
+            print(f"  ★ TPR@FPR<=5%: {tpr_at_fpr_5:.4f}")
         print(f"  未知类F1: {routed_results['unknown_f1']:.4f}")
         print(f"  未知类召回率(混合): {routed_results['unknown_recall']:.4f}")
         _g = routed_results.get('unknown_recall_genuine')
@@ -536,6 +595,10 @@ def run_ood_routing(
         'routed': {
             'auroc': auroc_ood,  # P0-3: 主指标
             'fpr_at_95tpr': fpr_at_95,
+            'auroc_genuine': auroc_genuine,
+            'auroc_simulated': auroc_simulated,
+            'tpr_at_fpr_1': tpr_at_fpr_1,
+            'tpr_at_fpr_5': tpr_at_fpr_5,
             'accuracy': routed_results['accuracy'],
             'accuracy_open': routed_results.get('accuracy_open', routed_results['accuracy']),
             'macro_f1': routed_results['macro_f1'],
@@ -595,6 +658,10 @@ def run_ood_routing(
         'total_test': len(all_labels_collected),
         'auroc': auroc_ood,  # P0-3: 主指标
         'fpr_at_95tpr': fpr_at_95,
+        'auroc_genuine': auroc_genuine,
+        'auroc_simulated': auroc_simulated,
+        'tpr_at_fpr_1': tpr_at_fpr_1,
+        'tpr_at_fpr_5': tpr_at_fpr_5,
         'unknown_f1': routed_results['unknown_f1'],
         'unknown_recall': routed_results['unknown_recall'],
         'unknown_recall_genuine': routed_results.get('unknown_recall_genuine'),
@@ -621,6 +688,10 @@ def run_ood_routing(
 
     return {
         'auroc': auroc_ood,  # P0-3: 主指标
+        'auroc_genuine': auroc_genuine,
+        'auroc_simulated': auroc_simulated,
+        'tpr_at_fpr_1': tpr_at_fpr_1,
+        'tpr_at_fpr_5': tpr_at_fpr_5,
         'routed_results': routed_results,
         'a3_baseline': {
             'known_accuracy': a3_known_acc if compare_baseline else None,

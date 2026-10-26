@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from transformers import AutoModel, AutoTokenizer
+from utils.flow_features import TEXT_MAX_LENGTH
 
 
 class BertEncoder(nn.Module):
@@ -76,7 +77,7 @@ class BertEncoder(nn.Module):
                 batch_texts,
                 padding=True,
                 truncation=True,
-                max_length=128,
+                max_length=TEXT_MAX_LENGTH,
                 return_tensors="pt"
             ).to(self.device)
 

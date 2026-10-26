@@ -17,24 +17,18 @@ from sklearn.model_selection import train_test_split
 from src.model_architectures.bert_encoder import BertEncoder
 from utils.log_utils import save_log
 from config.label_config import MERGED_LABEL_MAPPING, MERGED_LABEL_NAMES
+from utils.flow_features import (
+    TEXT_FEATURES,
+    assert_finite,
+    generate_text_description,
+    select_numeric_columns,
+)
 
 BASE_INPUT_DIR = os.path.join(PROJECT_ROOT, "processed_dataset")
 BASE_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "split_data")
 BERT_MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "bert")
 TEST_SIZE = 0.2
 VAL_SIZE = 0.1
-
-SELECTED_FEATURES = [
-    "Bwd Packet Length Mean",
-    "Avg Bwd Segment Size",
-    "Bwd Packet Length Max",
-    "Bwd Packet Length Std",
-    "Destination Port",
-    "URG Flag Count",
-    "Packet Length Mean",
-    "Average Packet Size",
-    "Packet Length Std"
-]
 
 # 导入合并后的标签映射（12类）
 # 如果需要使用原始15类，请手动修改这里
@@ -61,21 +55,6 @@ def get_next_split_id(dataset_id):
                 pass
     
     return max_id + 1
-
-
-def generate_text_description(row):
-    parts = []
-    parts.append(f"目标端口是{int(row['Destination Port'])}")
-    parts.append(f"反向包平均长度{row['Bwd Packet Length Mean']:.1f}字节")
-    parts.append(f"反向段平均大小{row['Avg Bwd Segment Size']:.1f}字节")
-    parts.append(f"反向包最大长度{int(row['Bwd Packet Length Max'])}字节")
-    parts.append(f"反向包长度标准差{row['Bwd Packet Length Std']:.1f}")
-    parts.append(f"URG标志计数{int(row['URG Flag Count'])}")
-    parts.append(f"包平均长度{row['Packet Length Mean']:.1f}字节")
-    parts.append(f"平均包大小{row['Average Packet Size']:.1f}字节")
-    parts.append(f"包长度标准差{row['Packet Length Std']:.1f}")
-    
-    return "。".join(parts) + "。"
 
 
 def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VAL_SIZE,
@@ -119,20 +98,21 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VA
     print(f"数据集: {df.shape[0]}行, {df.shape[1]}列")
 
     print("\n2. 统计特征模态（连续特征）...")
-    available_features = [f for f in SELECTED_FEATURES if f in df.columns]
-    if len(available_features) < len(SELECTED_FEATURES):
-        missing = set(SELECTED_FEATURES) - set(available_features)
-        print(f"  警告: 缺少特征列 {missing}")
-    
-    X = df[available_features]
+    numeric_columns = select_numeric_columns(df)
+    assert_finite(df, numeric_columns, split_name="输入数据")
+    print(f"  - 数值分支维度: {len(numeric_columns)}")
+
+    X = df[numeric_columns]
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X).astype(np.float32)
     print(f"  - 统计特征维度: {X_scaled.shape}")
 
     print("\n3. 文本描述模态（离散特征）...")
-    if "text_description" not in df.columns:
-        print("  - 生成文本描述...")
-        df['text_description'] = df.apply(generate_text_description, axis=1)
+    missing_text = [c for c in TEXT_FEATURES if c not in df.columns]
+    if missing_text:
+        raise ValueError(f"缺少文本字段: {missing_text}，禁止回落到旧 text_description")
+    print(f"  - 按 {len(TEXT_FEATURES)} 字段统一模板重新生成文本描述...")
+    df['text_description'] = df.apply(generate_text_description, axis=1)
     text_descriptions = df['text_description'].tolist()
     print(f"  - 文本描述数量: {len(text_descriptions)}")
 
@@ -299,6 +279,7 @@ def split_modality(dataset_id=0, split_id=None, test_size=TEST_SIZE, val_size=VA
         'val_size': val_size,
         'random_state': random_state,
         'num_classes': len(np.unique(labels)),
+        'numeric_dim': int(X_scaled.shape[1]),
         'output_dir': os.path.abspath(output_dir),
         'duration_seconds': duration_seconds
     }

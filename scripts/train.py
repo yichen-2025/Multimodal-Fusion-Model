@@ -22,9 +22,10 @@ from src.model_architectures.multi_modal_model import MultiModalFusionModel, Foc
 from src.data.data_loader import generate_mock_data, load_real_data, load_split_data, collate_fn
 from utils.log_utils import save_log
 from utils.caliber import CaliberError, assert_label_space
+from utils.flow_features import TEXT_MAX_LENGTH
 
 
-def augmentation_collate_fn(batch, tokenizer=None, max_length=128,
+def augmentation_collate_fn(batch, tokenizer=None, max_length=TEXT_MAX_LENGTH,
                             use_numeric=True, use_bert=True, use_llm=True,
                             noise_std=0.01, augmentation_prob=0.5):
     """
@@ -246,7 +247,7 @@ def generate_confusion_matrix(model, eval_dataset, device, save_path, label_name
                         texts,
                         padding=True,
                         truncation=True,
-                        max_length=128,
+                        max_length=TEXT_MAX_LENGTH,
                         return_tensors="pt"
                     )
                     input_ids = encodings["input_ids"].to(device)
@@ -614,9 +615,14 @@ def train_model(model_path=None,
     if use_weighted_sampler:
         sampler = create_weighted_sampler(train_dataset, num_classes)
 
+    # 数值编码器维度必须与数据集一致（模型默认 9 维，在 79 维输入下会直接报错）
+    numeric_input_dim = int(len(train_dataset[0]['stat']))
+    print(f"  - 数值特征维度: {numeric_input_dim}")
+
     # 初始化模型（需在 num_classes 确定后）
     model = MultiModalFusionModel(
         llm_model_path=model_path,
+        numeric_input_dim=numeric_input_dim,
         use_numeric=use_numeric,
         use_bert=use_bert,
         use_llm=use_llm,
@@ -786,6 +792,8 @@ def train_model(model_path=None,
         f.write(f"lora_r: {lora_r}\n")
         f.write(f"lora_alpha: {lora_alpha}\n")
         f.write(f"num_classes: {num_classes}\n")
+        f.write(f"numeric_input_dim: {numeric_input_dim}\n")
+        f.write(f"text_max_length: {TEXT_MAX_LENGTH}\n")
         f.write(f"per_device_train_batch_size: {per_device_train_batch_size}\n")
         f.write(f"gradient_accumulation_steps: {gradient_accumulation_steps}\n")
         f.write(f"learning_rate: {learning_rate}\n")
@@ -830,6 +838,7 @@ def train_model(model_path=None,
         'lora_r': lora_r,
         'lora_alpha': lora_alpha,
         'num_classes': num_classes,
+        'numeric_input_dim': numeric_input_dim,
         'learning_rate': learning_rate,
         'epochs': num_train_epochs,
         'batch_size': per_device_train_batch_size,

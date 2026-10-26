@@ -12,21 +12,17 @@ sys.path.insert(0, PROJECT_ROOT)
 from utils.dirs import ensure_dirs
 from utils.log_utils import save_log
 from config.label_config import MERGED_LABEL_NAMES
+from utils.flow_features import (
+    TEXT_FEATURES,
+    TEXT_MAX_LENGTH,
+    assert_finite,
+    deduplicate_by_features,
+    generate_text_description,
+    select_numeric_columns,
+)
 
 INPUT_CSV = os.path.join(PROJECT_ROOT, "processed_dataset", "processed_dataset.csv")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "processed_dataset")
-
-SELECTED_FEATURES = [
-    "Bwd Packet Length Mean",
-    "Avg Bwd Segment Size",
-    "Bwd Packet Length Max",
-    "Bwd Packet Length Std",
-    "Destination Port",
-    "URG Flag Count",
-    "Packet Length Mean",
-    "Average Packet Size",
-    "Packet Length Std"
-]
 
 
 def get_next_dataset_id():
@@ -104,7 +100,7 @@ def compute_class_counts(label_counts, total_samples, mode="stratified", per_cla
         raise ValueError(f"未知采样模式: {mode}")
 
 
-def extract_subset(total_samples=None, ratio=None, mode="stratified",
+def extract_subset(total_samples=None, ratio=None, mode=None,
                    per_class=None, dataset_id=None, random_state=42):
     """
     从processed_dataset.csv中提取子集，支持多分类分层采样
@@ -128,6 +124,9 @@ def extract_subset(total_samples=None, ratio=None, mode="stratified",
         if not os.path.exists(INPUT_CSV):
             raise FileNotFoundError(f"输入文件不存在: {INPUT_CSV}")
 
+        if mode is None:
+            raise ValueError("必须显式指定 --mode（本方案要求 'balanced'），禁止使用脚本默认值")
+
         if total_samples is None and ratio is None:
             total_samples = 10000
 
@@ -146,6 +145,26 @@ def extract_subset(total_samples=None, ratio=None, mode="stratified",
 
         print("\n2. 原始标签分布...")
         label_counts = df['Label'].value_counts().sort_index()
+        for lbl, cnt in label_counts.items():
+            name = MERGED_LABEL_NAMES.get(int(lbl), str(lbl))
+            pct = cnt / len(df) * 100
+            print(f"  {int(lbl):2d}: {name:<30s} = {cnt:>8d} ({pct:5.1f}%)")
+
+        print("\n2.1 按数值特征去重（跨标签重复组整组剔除）...")
+        numeric_columns = select_numeric_columns(df)
+        assert_finite(df, numeric_columns, split_name="原始数据")
+        print(f"  - 数值分支维度: {len(numeric_columns)}")
+        df, dedup_stats = deduplicate_by_features(df, numeric_columns, label_column='Label')
+        print(f"  - 去重前: {dedup_stats['input_rows']} 行 / 唯一特征组 {dedup_stats['unique_feature_groups']}")
+        print(f"  - 跨标签重复组: {dedup_stats['cross_label_groups']} 组 / "
+              f"{dedup_stats['cross_label_rows']} 行（整组剔除）")
+        print(f"  - 组内重复: {dedup_stats['duplicate_rows_removed']} 行（保留首个）")
+        print(f"  - 去重后: {dedup_stats['output_rows']} 行")
+        if dedup_stats['output_rows'] == 0:
+            raise ValueError("去重后无可用样本")
+
+        label_counts = df['Label'].value_counts().sort_index()
+        print("  去重后标签分布:")
         for lbl, cnt in label_counts.items():
             name = MERGED_LABEL_NAMES.get(int(lbl), str(lbl))
             pct = cnt / len(df) * 100
@@ -188,8 +207,13 @@ def extract_subset(total_samples=None, ratio=None, mode="stratified",
             print(f"  {int(lbl):2d}: {name:<30s} = {cnt:>6d} ({pct:5.1f}%)")
         print(f"  总计: {len(df_subset)}行")
 
-        print("\n6. 标准化数值特征...")
-        X = df_subset[SELECTED_FEATURES]
+        print("\n6. 重新生成文本描述并标准化数值特征...")
+        df_subset['text_description'] = df_subset.apply(generate_text_description, axis=1)
+        assert_finite(df_subset, numeric_columns, split_name="采样后数据")
+        print(f"  - 数值唯一行: {df_subset[numeric_columns].drop_duplicates().shape[0]}/{len(df_subset)}")
+        print(f"  - 文本唯一行: {df_subset['text_description'].nunique()}/{len(df_subset)}")
+
+        X = df_subset[numeric_columns]
         y = df_subset['Label']
 
         scaler = StandardScaler()
@@ -240,6 +264,10 @@ def extract_subset(total_samples=None, ratio=None, mode="stratified",
             'sampling_ratio': round(len(df_subset) / len(df), 4),
             'random_state': random_state,
             'class_distribution': {int(k): int(v) for k, v in subset_counts.items()},
+            'numeric_dim': int(X_scaled.shape[1]),
+            'text_fields': len(TEXT_FEATURES),
+            'text_max_length': TEXT_MAX_LENGTH,
+            'dedup': dedup_stats,
             'output_dir': os.path.abspath(OUTPUT_DIR)
         }
         log_id = save_log('subset', log_data)
@@ -263,9 +291,9 @@ if __name__ == "__main__":
                         help="目标总样本数（如10000），与--ratio二选一")
     parser.add_argument("--ratio", type=float, default=None,
                         help="保留比例（如0.1表示10%%），与--total_samples二选一")
-    parser.add_argument("--mode", type=str, default="stratified",
+    parser.add_argument("--mode", type=str, default=None,
                         choices=["stratified", "balanced", "custom"],
-                        help="采样模式: stratified=按原始比例, balanced=每类均衡, custom=自定义数量")
+                        help="采样模式（必须显式指定）: stratified=按原始比例, balanced=每类均衡, custom=自定义数量")
     parser.add_argument("--per_class", type=str, default=None,
                         help="custom模式下每类采样数，格式: '0:5000,1:3000,2:500,...'")
     parser.add_argument("--dataset_id", type=int, default=None,

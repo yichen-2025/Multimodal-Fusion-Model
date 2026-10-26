@@ -437,6 +437,8 @@ def make_openset_split(dataset_id=0,
     # ========== 6. 构造 CSV 文本描述 ==========
     print("\n" + "-" * 40)
     print("6. 构造 CSV 文本描述...")
+    # 文本不得携带任何 label/origin 标记（来源只由 unknown_origin 表达），
+    # 这里只搬运 text_description，不做任何前缀改写。
 
     def gather_csv_rows(csv_df, idx_list, new_labels):
         if csv_df is None:
@@ -454,10 +456,6 @@ def make_openset_split(dataset_id=0,
         if len(val_unknown_idx) > 0:
             val_unknown_csv = val_csv.iloc[val_unknown_idx].copy()
             val_unknown_csv['Label'] = unknown_label
-            if 'text_description' in val_unknown_csv.columns:
-                val_unknown_csv['text_description'] = val_unknown_csv['text_description'].apply(
-                    lambda x: f"[未知-留出类] {x}" if pd.notna(x) else "[未知-留出类]"
-                )
             new_val_csv = pd.concat([val_known_csv, val_unknown_csv], ignore_index=True)
         else:
             new_val_csv = val_known_csv
@@ -472,27 +470,15 @@ def make_openset_split(dataset_id=0,
         # (b) simulated unknown 部分
         test_csv_b = test_csv.iloc[test_simulated_idx].copy()
         test_csv_b['Label'] = unknown_label
-        if 'text_description' in test_csv_b.columns:
-            test_csv_b['text_description'] = test_csv_b['text_description'].apply(
-                lambda x: f"[未知-模拟] {x}" if pd.notna(x) else "[未知-模拟]"
-            )
 
         # (c) hold-out unknown 部分
         test_csv_c = test_csv.iloc[test_holdout_idx].copy()
         test_csv_c['Label'] = unknown_label
-        if 'text_description' in test_csv_c.columns:
-            test_csv_c['text_description'] = test_csv_c['text_description'].apply(
-                lambda x: f"[未知-留出类] {x}" if pd.notna(x) else "[未知-留出类]"
-            )
 
         # (d) 源 val hold-out 剩余 → 移入 test
         if len(val_holdout_to_test) > 0 and val_csv is not None:
             test_csv_d = val_csv.iloc[val_holdout_to_test].copy()
             test_csv_d['Label'] = unknown_label
-            if 'text_description' in test_csv_d.columns:
-                test_csv_d['text_description'] = test_csv_d['text_description'].apply(
-                    lambda x: f"[未知-留出类-来自val] {x}" if pd.notna(x) else "[未知-留出类-来自val]"
-                )
             new_test_csv = pd.concat([test_csv_a, test_csv_b, test_csv_c, test_csv_d], ignore_index=True)
         else:
             new_test_csv = pd.concat([test_csv_a, test_csv_b, test_csv_c], ignore_index=True)

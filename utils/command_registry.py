@@ -112,6 +112,11 @@ COMMAND_REGISTRY = {
         "modified_files": [],
         "notes": "Phase2 B1: A3预测 + 基座LLM生成解释+MITRE映射",
     },
+    "validate_inputs": {
+        "generated_files": [],
+        "modified_files": [],
+        "notes": "阶段 2 输入验收：维度/NaN/origin/唯一性/泄漏检查，任一失败即退出 1",
+    },
 }
 
 # 未注册命令的默认模板

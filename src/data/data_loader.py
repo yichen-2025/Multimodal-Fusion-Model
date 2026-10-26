@@ -3,6 +3,7 @@ import numpy as np
 import os
 from datasets import Dataset
 from ..model_architectures.bert_encoder import BertEncoder
+from utils.flow_features import TEXT_MAX_LENGTH
 
 
 def generate_mock_data(num_samples=100):
@@ -248,7 +249,7 @@ def extract_text_embeddings(text_descriptions, bert_model_name="bert-base-chines
     return embeddings.cpu().numpy()
 
 
-def collate_fn(batch, tokenizer=None, max_length=128, 
+def collate_fn(batch, tokenizer=None, max_length=TEXT_MAX_LENGTH, 
                use_numeric=True, use_bert=True, use_llm=True):
     """
     数据批处理函数（用于DataLoader）
@@ -259,7 +260,7 @@ def collate_fn(batch, tokenizer=None, max_length=128,
     Args:
         batch (list): 样本列表，每个样本是包含stat、bert、label、text的字典
         tokenizer (optional): LLM的tokenizer，用于文本编码
-        max_length (int): 文本最大长度，默认为128
+        max_length (int): 文本最大长度，默认与 TEXT_MAX_LENGTH 一致（256）
         use_numeric (bool): 是否使用数值模态，False时返回零张量
         use_bert (bool): 是否使用文本模态，False时返回零张量
         use_llm (bool): 是否使用LLM，False时不返回input_ids和attention_mask

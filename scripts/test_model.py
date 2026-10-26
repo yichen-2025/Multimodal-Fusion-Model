@@ -18,6 +18,7 @@ from transformers import AutoTokenizer
 from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.data.data_loader import load_real_data, generate_mock_data, load_split_data
 from utils.open_set_eval import evaluate_open_set  # B8：统一评估口径
+from utils.flow_features import TEXT_MAX_LENGTH
 from config.label_config import MERGED_LABEL_NAMES
 from utils.caliber import (
     CaliberError, read_model_num_classes, assert_classifier_dim,
@@ -66,7 +67,7 @@ def evaluate_model(model, dataset, tokenizer=None, device=None):
                     text,
                     padding=True,
                     truncation=True,
-                    max_length=128,
+                    max_length=TEXT_MAX_LENGTH,
                     return_tensors="pt"
                 )
                 input_ids = encodings["input_ids"].to(device)
@@ -417,7 +418,7 @@ def evaluate_open_set_model(model, dataset, tokenizer=None, device=None, num_kno
 
             if model.use_llm and tokenizer is not None and "text" in sample:
                 text = sample["text"] if sample["text"] else ""
-                encodings = tokenizer(text, padding=True, truncation=True, max_length=128, return_tensors="pt")
+                encodings = tokenizer(text, padding=True, truncation=True, max_length=TEXT_MAX_LENGTH, return_tensors="pt")
                 input_ids = encodings["input_ids"].to(device)
                 attention_mask = encodings["attention_mask"].to(device)
                 outputs = model(stat_vector, bert_tensor, input_ids=input_ids, attention_mask=attention_mask)
