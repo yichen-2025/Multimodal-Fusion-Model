@@ -457,8 +457,24 @@ def collect():
                 })
 
     # ---- 台账行：解释结果（按 config.sampling 判定；随机抽样分母不可对齐全量）
+    retrieval_runs = sorted(glob.glob(os.path.join(EXPL_DIR, "eval_retrieval_*.json")))
+    latest_retrieval = os.path.basename(retrieval_runs[-1]) if retrieval_runs else ""
     for path in sorted(glob.glob(os.path.join(EXPL_DIR, "*.json"))):
         name = os.path.basename(path)
+        if name.startswith("eval_retrieval_"):
+            is_latest = name == latest_retrieval
+            rows.append({
+                "kind": "explanation_eval", "id": name, "path": relpath(path),
+                "status": "active" if is_latest else "deprecated",
+                "reason": ("CTI-RAG 离线检索评估（最新一次）：top-k 命中 true_mitre_ids 与每类 top-1，"
+                           "不参与抽样口径判定") if is_latest
+                          else "知识库关键词调优前的检索评估，已被较新一次取代",
+                "superseded_by": "" if is_latest else latest_retrieval,
+                "num_classes": "", "split_name": "",
+                "size_bytes": dirsize(path), "digest": digest(path),
+                "archive_path": "", "updated_at": now,
+            })
+            continue
         if name.startswith("eval_"):
             rows.append({
                 "kind": "explanation_eval", "id": name, "path": relpath(path),
