@@ -12,7 +12,7 @@ import re
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
-from src.explain.knowledge_base import get_kb_entries
+from src.explain.knowledge_base import get_kb_entries, get_entry
 
 TOKEN_RE = re.compile(r"[a-z]+_[a-z0-9]+|[a-z][a-z\-]*|\d+")
 NUM = r"-?\d+(?:\.\d+)?(?:e[+-]\d+)?"
@@ -110,3 +110,52 @@ class BM25Retriever:
     def top1(self, text: str) -> Optional[str]:
         ranked = self.retrieve(text, 1)
         return ranked[0][0] if ranked else None
+
+
+_DEFAULT_RETRIEVER: Optional[BM25Retriever] = None
+
+
+def get_retriever() -> BM25Retriever:
+    """进程内复用同一个检索器（知识库固定，避免每条样本重复建索引）。"""
+    global _DEFAULT_RETRIEVER
+    if _DEFAULT_RETRIEVER is None:
+        _DEFAULT_RETRIEVER = BM25Retriever()
+    return _DEFAULT_RETRIEVER
+
+
+def build_cti_explanation(text: str, k: int = 3) -> Dict[str, object]:
+    """为一条被判为 unknown 的流量生成检索增强的 ATT&CK 解释。
+
+    只读取流量文本特征：不读取 unknown_origin，也不参与 known/unknown 判定。
+    """
+    tokens = extract_behavior_tokens(text)
+    entries = []
+    for mid, score in get_retriever().retrieve(text, k):
+        entry = get_entry(mid) or {}
+        entries.append({
+            "id": mid,
+            "name": entry.get("name", ""),
+            "score": round(float(score), 4),
+            "detection": entry.get("detection", ""),
+        })
+
+    top = entries[0] if entries else None
+    if top:
+        body = ("该流量被 OOD 头判定为未知类。按行为特征（%s）检索到最相近的 ATT&CK 技术："
+                "%s %s。检测线索：%s" % ("、".join(tokens) or "无", top["id"], top["name"],
+                                          top["detection"]))
+        if len(entries) > 1:
+            body += "\n备选技术：" + "；".join(
+                "%s %s（%.2f）" % (x["id"], x["name"], x["score"]) for x in entries[1:]
+            )
+    else:
+        body = "该流量被 OOD 头判定为未知类，但未能检索到相近的 ATT&CK 技术。"
+    body += "\n说明：以上技术仅为检索给出的相近解释，不改变 unknown 判定。"
+
+    return {
+        "behavior_tokens": tokens,
+        "top_k": entries,
+        "top_id": top["id"] if top else None,
+        "top_score": top["score"] if top else None,
+        "text": body,
+    }

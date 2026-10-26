@@ -21,6 +21,7 @@ from utils.dirs import ensure_dirs
 from src.model_architectures.multi_modal_model import MultiModalFusionModel
 from src.model_architectures.ood_head import OODHead
 from src.data.data_loader import load_split_data, collate_fn
+from src.explain.retriever import build_cti_explanation
 from utils.log_utils import save_log
 from utils.caliber import CaliberError
 
@@ -379,6 +380,7 @@ def run_ood_routing(
     all_unknown_flags = []
     all_labels_collected = []
     routing_log = []
+    n_cti_explanations = 0   # 仅统计：unknown 路径生成的 CTI-RAG 解释条数（不参与判类）
 
     # LLM提示模板（多分类版本）
     llm_prompt_template = (
@@ -429,18 +431,25 @@ def run_ood_routing(
         # 所以 OOD 头标记 unknown → 直接输出 num_known_classes 即可
         unknown_indices = torch.where(unknown_mask)[0]
         if len(unknown_indices) > 0:
+            batch_start = len(all_labels_collected)   # shuffle=False，batch 内顺序即数据集顺序
             for idx in unknown_indices:
                 routed_pred[idx] = num_known_classes
 
-                # 路由日志（后续加 CTI-RAG 时可在这后面追加解释字段）
+                # CTI-RAG：仅在 unknown 路径生成解释文本，不参与 known/unknown 判定
+                sample_idx = int(idx.item())
+                sample_text = test_dataset[batch_start + sample_idx].get("text", "")
+                explanation = build_cti_explanation(sample_text)
+                n_cti_explanations += 1
+
+                # 路由日志
                 routing_log.append({
-                    'sample_idx': idx.item(),
+                    'sample_idx': sample_idx,
                     'ood_score': ood_scores[idx].item(),
                     'a3_pred_known_class': int(a3_pred[idx].item()),
                     'routed_pred': num_known_classes,  # K = unknown label
                     'ood_flagged': True,
                     'true_label': int(labels[idx].item()),
-                    'cti_rag_explanation': None,  # Phase 3 填充
+                    'cti_rag_explanation': explanation,
                 })
 
         # .float() 防 bf16：numpy 不支持 BFloat16 类型
@@ -458,6 +467,7 @@ def run_ood_routing(
 
     if verbose:
         print(f"\n  推理完成! 总样本: {len(all_labels_collected)}, 路由到LLM: {sum(all_unknown_flags)}")
+        print(f"  CTI-RAG 解释已生成: {n_cti_explanations} 条（仅 unknown 路径，不参与判类）")
 
     # ========== 7. 评估 ==========
     if verbose:
