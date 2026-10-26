@@ -117,6 +117,20 @@ COMMAND_REGISTRY = {
         "modified_files": [],
         "notes": "阶段 2 输入验收：维度/NaN/origin/唯一性/泄漏检查，任一失败即退出 1",
     },
+    "eval_explanations": {
+        "generated_files": [
+            "explanation_results/eval_<timestamp>.json",
+        ],
+        "modified_files": [],
+        "notes": "Phase2 B1: 解释质量指标（MITRE 命中/引用率/类别一致）",
+    },
+    "eval_retrieval": {
+        "generated_files": [
+            "explanation_results/eval_retrieval_<timestamp>.json",
+        ],
+        "modified_files": [],
+        "notes": "Phase2 B2: CTI-RAG 离线检索评估，top-1 命中 true_mitre_ids 需 ≥0.50",
+    },
 }
 
 # 未注册命令的默认模板
