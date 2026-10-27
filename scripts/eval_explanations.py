@@ -23,9 +23,18 @@ import numpy as np
 
 from src.explain.attack_mapping import get_true_mitre_ids
 
-NUM_RE = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
+NUM_RE = re.compile(r"(?<![\d.])-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
+# 技术编号（T1046 / T1498.002）不是数值特征，不能算进"编造数字"
+TECH_RE = re.compile(r"T\d{4}(?:\.\d{3})?(?!\d)", re.I)
+# "6.316×10^5" 与文本里的 "6.316e+05" 等价，先归一再比对
+SCI_RE = re.compile(r"(\d+(?:\.\d+)?)\s*[×xX*]\s*10\s*\^?\s*\(?\s*(-?\d+)\s*\)?")
+# 中文数量级后缀，按绝对数值比对（亿=1e8, 万=1e4, 千=1e3）
+UNIT_RE = re.compile(r"(?<![\d.])(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(亿|万|千)")
+UNIT_SCALE = {"亿": 1e8, "万": 1e4, "千": 1e3}
+NUM_RULE_VERSION = "v2(tech_strip+sci_norm+cn_unit+range)"
 
 # 规则版"解释与预测类别一致"：命中预测类别的关键词即可（粗糙代理指标，非语义判分）
+# strict：必须点出具体类别名，口径最严，仅作对照
 CLASS_KEYWORDS = {
     0: ["benign", "正常流量", "正常", "无攻击"],
     1: ["hulk"],
@@ -39,12 +48,48 @@ CLASS_KEYWORDS = {
     9: ["bot", "僵尸"],
 }
 
+# family：允许家族级表述（如 DoS 洪水 / 暴力破解 / Network Service Scanning）
+# 依据是 2026-10-27 对 44 条 strict 不一致样本的人工判定：11/20 属规则误杀（解释已给出家族级正确判断）
+FAMILY_KEYWORDS = {
+    0: ["没有明显", "无明显", "不具攻击性", "未发现", "良性", "排除", "非攻击", "常态化"],
+    1: ["dos", "拒绝服务", "洪水", "flood", "洪泛", "带宽", "资源耗尽", "资源消耗"],
+    2: ["goldeneye", "golden eye", "dos", "拒绝服务", "洪水", "flood", "洪泛", "带宽", "资源耗尽", "资源消耗"],
+    3: ["slowloris", "慢速", "slow", "dos", "拒绝服务", "洪水", "连接耗尽", "资源耗尽"],
+    4: ["slowhttptest", "slow http", "慢速", "dos", "拒绝服务", "洪水", "flood", "连接耗尽", "资源耗尽"],
+    5: ["ddos", "分布式拒绝", "dos", "拒绝服务", "洪水", "flood", "僵尸网络", "资源耗尽"],
+    6: ["portscan", "port scan", "端口扫描", "扫描", "scanning", "探测"],
+    7: ["ftp", "patator", "暴力破解", "暴力", "口令", "密码", "爆破", "登录尝试", "认证"],
+    8: ["ssh", "patator", "暴力破解", "暴力", "口令", "密码", "爆破", "登录尝试", "认证"],
+    9: ["bot", "僵尸", "c&c", "c2", "命令与控制", "回连", "木马", "远控"],
+}
+
+
+def is_class_consistent(pred_label, explanation, allow_family=True):
+    text = (explanation or "").lower()
+    keys = list(CLASS_KEYWORDS.get(pred_label, []))
+    if allow_family:
+        keys += FAMILY_KEYWORDS.get(pred_label, [])
+    return any(k.lower() in text for k in keys)
+
+
 ORIGIN_NAMES = {0: "known", 1: "genuine", 2: "simulated"}
 
 
-def parse_numbers(text):
-    out = []
-    for tok in NUM_RE.findall(text or ""):
+def parse_numbers(text, version=NUM_RULE_VERSION):
+    """解析文本中的数值；v2 先剔除技术编号、归一科学计数法、展开中文数量级。"""
+    raw = text or ""
+    if version == "legacy":
+        out = []
+        for tok in NUM_RE.findall(raw):
+            try:
+                out.append(float(tok))
+            except ValueError:
+                pass
+        return out
+    t = TECH_RE.sub(" ", raw)
+    t = SCI_RE.sub(lambda m: f"{m.group(1)}e{m.group(2)}", t)
+    out = [float(v) * UNIT_SCALE[u] for v, u in UNIT_RE.findall(t)]
+    for tok in NUM_RE.findall(t):
         try:
             out.append(float(tok))
         except ValueError:
@@ -124,26 +169,40 @@ def main():
     # ---------- 3) 特征引用率 ----------
     ref_ok = 0
     halluc = 0
+    legacy_ref_ok = 0
+    legacy_halluc = 0
     ref_details = []
     for r in results:
         text_nums = parse_numbers(r.get("text_description", ""))
         exp_nums = parse_numbers(r.get("explanation", ""))
         cited = [x for x in exp_nums if number_in(text_nums, x)]
         bad = [x for x in exp_nums if not number_in(text_nums, x)]
+        legacy_text = parse_numbers(r.get("text_description", ""), version="legacy")
+        legacy_exp = parse_numbers(r.get("explanation", ""), version="legacy")
+        legacy_bad = [x for x in legacy_exp if not number_in(legacy_text, x)]
         if cited:
             ref_ok += 1
         if bad:
             halluc += 1
+        if any(number_in(legacy_text, x) for x in legacy_exp):
+            legacy_ref_ok += 1
+        if legacy_bad:
+            legacy_halluc += 1
         ref_details.append({"sample_index": r["sample_index"], "n_numbers": len(exp_nums),
-                           "n_verified": len(cited), "n_unverified": len(bad)})
+                           "n_verified": len(cited), "n_unverified": len(bad),
+                           "unverified_tokens": bad[:8], "legacy_unverified_n": len(legacy_bad)})
 
     # ---------- 4) 类别一致性（规则版） ----------
     consistent = 0
+    strict_consistent = 0
     incons_samples = []
+    strict_incons = []
     for r in results:
-        kws = CLASS_KEYWORDS.get(r["pred_label"], [])
-        text = (r.get("explanation") or "").lower()
-        if any(k.lower() in text for k in kws):
+        if is_class_consistent(r["pred_label"], r.get("explanation"), allow_family=False):
+            strict_consistent += 1
+        else:
+            strict_incons.append(r["sample_index"])
+        if is_class_consistent(r["pred_label"], r.get("explanation"), allow_family=True):
             consistent += 1
         else:
             incons_samples.append(r["sample_index"])
@@ -174,10 +233,27 @@ def main():
             "reference_rate": round(ref_ok / n, 4),
             "unverified_number_rate": round(halluc / n, 4),
             "gate_pass": (ref_ok / n) >= args.min_ref_rate,
+            "number_rule_version": NUM_RULE_VERSION,
+            "unverified_samples": halluc,
+        },
+        "feature_reference_legacy": {
+            "reference_rate": round(legacy_ref_ok / n, 4),
+            "unverified_number_rate": round(legacy_halluc / n, 4),
+            "gate_pass": (legacy_ref_ok / n) >= args.min_ref_rate,
+            "number_rule_version": "legacy",
+            "unverified_samples": legacy_halluc,
         },
         "class_consistency_rule": {
             "rate": round(consistent / n, 4),
-            "inconsistent_samples": incons_samples[:10],
+            "rule_version": "family_v2",
+            "inconsistent_n": len(incons_samples),
+            "inconsistent_samples": incons_samples[:20],
+        },
+        "class_consistency_strict": {
+            "rate": round(strict_consistent / n, 4),
+            "rule_version": "strict_v1",
+            "inconsistent_n": len(strict_incons),
+            "inconsistent_samples": strict_incons[:20],
         },
         "gates": {
             "mitre_hit_target_met": (len(mitre_hits) / len(attack) if attack else 0) >= args.min_mitre_hit,
@@ -199,3 +275,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
