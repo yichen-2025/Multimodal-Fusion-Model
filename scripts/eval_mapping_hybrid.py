@@ -11,6 +11,7 @@
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -27,6 +28,15 @@ LABEL_NAMES = {
     0: "BENIGN", 1: "DoS Hulk", 2: "DoS GoldenEye", 3: "DoS slowloris", 4: "DoS Slowhttptest",
     5: "DDoS", 6: "PortScan", 7: "FTP-Patator", 8: "SSH-Patator", 9: "Bot",
 }
+
+
+def mcnemar_exact(b, c):
+    """McNemar 精确检验（双侧）：b=检索救回条数，c=检索弄坏条数。"""
+    n = b + c
+    if n == 0:
+        return 1.0
+    tail = sum(math.comb(n, i) for i in range(min(b, c) + 1)) / 2 ** n
+    return min(1.0, 2 * tail)
 
 
 def main():
@@ -103,6 +113,13 @@ def main():
         "rag_rescues": hits["rag_rescues"],
         "rag_hurts": hits["rag_hurts"],
         "neither_hit": hits["neither"],
+        "mcnemar_exact": {
+            "b_rag_rescues": hits["rag_rescues"],
+            "c_rag_hurts": hits["rag_hurts"],
+            "n_discordant": hits["rag_rescues"] + hits["rag_hurts"],
+            "p_value": round(mcnemar_exact(hits["rag_rescues"], hits["rag_hurts"]), 6),
+            "significant_at_0_05": mcnemar_exact(hits["rag_rescues"], hits["rag_hurts"]) < 0.05,
+        },
         "per_class": {
             int(k): f"n={per_class_n[k]} llm={per_class[k]['llm']} rag={per_class[k]['rag']} union={per_class[k]['union']}"
             for k in sorted(per_class_n)
@@ -111,6 +128,7 @@ def main():
             "rag_hit_met": (hits["rag"] / n if n else 0) >= args.min_rag_hit,
             "union_hit_met": (hits["union"] / n if n else 0) >= args.min_union_hit,
             "rag_net_positive": hits["rag_rescues"] > hits["rag_hurts"],
+            "llm_vs_rag_significant": mcnemar_exact(hits["rag_rescues"], hits["rag_hurts"]) < 0.05,
         },
     }
 
