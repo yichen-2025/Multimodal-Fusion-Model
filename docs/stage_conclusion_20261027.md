@@ -29,7 +29,7 @@
 
 ## 3. OOD 三 seed（本次补齐）
 
-每个变体 3 个 backbone seed，每头独立训练（head seed 固定 42，`cosine` + `temperature=0.1`）。数值取各自 `ood_routing` 报告的 `routed.*`；`±` 后为 **样本标准差（ddof=1, n=3）**，不是总体标准差：
+每个变体 3 个 backbone seed、每头独立训练（head seed 固定 42，`cosine` + `temperature=0.1`）。数值取各自 `ood_routing` 报告的 `routed.*`；`±` 后为 **样本标准差（ddof=1, n=3）**，不是总体标准差：
 
 | 变体 | head 与 backbone | `auroc_genuine` 三个 seed | mean ± sd | `tpr@fpr=1%` mean ± sd | `unknown_recall_simulated` mean ± sd | `known_accuracy` mean |
 |---|---|---|---|---|---|---|
@@ -42,7 +42,24 @@
 - AUROC 口径：纯文本 0.9606 高于 concat 0.9370（差 2.35pp，约为 concat 组内 sd 的 12 倍），与闭集"无增益"方向一致；add 均值持平但 sd 大 2.6 倍；attn 最低。
 - 低 FPR 操作点口径：`tpr@fpr=1%` 与 `unknown_recall_simulated` 上 concat（0.0840 / 0.0900）反而高于纯文本（0.0485 / 0.0388），差 3.5pp / 5.1pp，约为组内 sd 的 5–7 倍。路由实际用的是阈值判定，这一口径更接近部署行为。
 - 合并结论：**没有任何变体在两个口径上同时优于纯文本**；既不能宣称"数值模态有增益"，也不能宣称"纯文本更优"。concat 的 `known_accuracy`（0.9200）同样低于纯文本（0.9380）。
-**口径提醒**：sd 只反映 backbone seed 方差（head seed 固定 42），不能当作全流程方差；跨变体比较时两组 sd 不等价，差值判读需谨慎。`A0*_add` 的 seed 456 用 2012（2008 已 invalid 归档）。
+**口径提醒**：sd 主要反映 backbone seed 方差；head seed 42/43/44 已在 8 个 backbone 上补测（见 3.1），对 `auroc_genuine` 的贡献 ≤0.00014（0.014pp），按 `sqrt(sd_backbone² + sd_head²)` 合成后四组 sd 仍为 0.0087 / 0.0020 / 0.0225 / 0.0118，差异 <0.0001，因此**两条判读不变**（重算：AUROC 差 2.36pp = concat sd 的 12.1 倍；`tpr@fpr=1%` 差 3.55pp = 5.4 倍、`unknown_recall_simulated` 差 5.11pp = 7.2 倍）。但工作点类指标在 `A0*_add` 上存在 0.61pp 的 head 敏感点，单 head 的操作点数值仍应按"含 seed 波动"表述。跨变体比较时两组 sd 不等价，差值判读需谨慎。`A0*_add` 的 seed 456 用 2012（2008 已 invalid 归档）。
+
+### 3.1 检测头 seed 扩展（P1，2026-10-28）
+
+对 8 个已训 backbone 各补 2 个检测头（head seed 43/44，`ood_id 23..38`），得到 16 个新头 + 16 份路由报告，重算含 head 方差的统计，检验第 3 节"12 倍 / 5–7 倍"两条判读是否仍成立。汇总脚本 `scripts/summarize_ood_multiseed.py`（只读 `ood_reports/`，不重跑训练/路由）。
+
+**head seed 对指标的影响（同一 backbone 上 head 42/43/44 的极差与标准差）**：
+
+| 变体 | 指标 | head 极差（3 seed） | head 内 sd（ddof=1） |
+|---|---|---|---|
+| `A0*_no_num` | `auroc_genuine` | 0.00003 | 0.00002 |
+| `A0*_no_num` | `tpr@fpr=1%` / `unknown_recall_simulated` / `known_accuracy` | 0.00000 | 0.00000 |
+| `A0*`(concat) | `auroc_genuine` | 0.00014 | 0.00007 |
+| `A0*_add` | `auroc_genuine` | 0.00012 | 0.00006 |
+| `A0*_add` | `unknown_recall_simulated` | 0.00613 | 0.00354 |
+| `A0*_attn` | `auroc_genuine` | 0.00001 | 0.00000 |
+
+head seed 引入的方差约为 backbone seed 的 1/100 以下，可以忽略；本节与第 3 节"无增益"判读不变。`A0*_add` 唯一例外是 `unknown_recall_simulated`（head 极差 0.00613，backbone 级 0.0522），但该指标本身离散且不参与否定性判读。
 
 ## 4. 映射路径对比（A1）
 
@@ -147,6 +164,15 @@ v3 只修"换算正确但校验器只认字面"的误判（`3.272e+06` 微秒写
 /root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/generate_unknown_explanations.py \
   --routing_report ood_reports/ood_routing_20261027_084942.json --n_samples 100 --seed 42
 
+# R7 head seed 扩展（P1：seed 43/44 × 8 backbone，ood_id 23..38；示例给第一组）
+/root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/train_ood_head.py \
+  --model_id 2001 --ood_id 23 --dataset_id 200 --split_id 0 \
+  --variant 'A0*_no_num' --distance_type cosine --temperature 0.1 --epochs 10 --seed 43
+/root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/run_ood_routing.py \
+  --backbone_model_id 2001 --ood_id 23 --dataset_id 200 --split_id 0 --backbone_variant 'A0*_no_num'
+/root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/summarize_ood_multiseed.py \
+  --out results/2026-10-28/ood_multiseed_summary_20261028.json
+
 # R5 口径与台账
 /root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/audit_artifacts.py --check
 /root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/verify_caliber.py
@@ -164,6 +190,9 @@ v3 只修"换算正确但校验器只认字面"的误判（`3.272e+06` 微秒写
 | unknown 路径 LLM 解释（C1，active） | `explanation_results/unknown_explanations_model2011_ood22_20261028_093615.json` |
 | OOD 路由报告 | `ood_reports/ood_routing_20261027_0829..0849.json`（8 份） |
 | OOD 头 | `saved_ood_heads/ood_head_15..22` |
+| OOD head seed 扩展汇总（P1，ddof=1 两级统计） | `results/2026-10-28/ood_multiseed_summary_20261028.json` |
+| OOD 路由报告（P1，16 份） | `ood_reports/ood_routing_20261028_1022..1103.json` |
+| OOD 头（P1） | `saved_ood_heads/ood_head_23..38` |
 | 台账 | `artifacts/ledger.csv` |
 | 归档清单 | `_archive/MANIFEST.jsonl` |
 
