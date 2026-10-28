@@ -1,0 +1,21 @@
+﻿变体,指标,backbone级mean,"backbone级sd(ddof=1,n=3)",head级极差(max over backbone),head级sd(max over backbone)
+A0*_no_num,auroc_genuine,0.960633,0.008756,0.000027,0.000016
+A0*_no_num,tpr_at_fpr_1,0.048485,0.009122,0.000000,0.000000
+A0*_no_num,unknown_recall_simulated,0.038855,0.003542,0.000000,0.000000
+A0*_no_num,known_accuracy,0.937966,0.006201,0.000000,0.000000
+A0*_no_num,unknown_recall_genuine,0.960961,0.033809,0.000000,0.000000
+A0*,auroc_genuine,0.937061,0.001949,0.000139,0.000070
+A0*,tpr_at_fpr_1,0.083983,0.006537,0.000000,0.000000
+A0*,unknown_recall_simulated,0.089980,0.007084,0.000000,0.000000
+A0*,known_accuracy,0.920040,0.006052,0.000000,0.000000
+A0*,unknown_recall_genuine,0.948949,0.038310,0.000000,0.000000
+A0*_add,auroc_genuine,0.960809,0.022477,0.000117,0.000060
+A0*_add,tpr_at_fpr_1,0.083983,0.006537,0.000000,0.000000
+A0*_add,unknown_recall_simulated,0.106339,0.052177,0.006135,0.003542
+A0*_add,known_accuracy,0.907351,0.048836,0.000604,0.000349
+A0*_add,unknown_recall_genuine,0.977477,0.027400,0.000000,0.000000
+A0*_attn,auroc_genuine,0.924313,0.011830,0.000007,0.000004
+A0*_attn,tpr_at_fpr_1,0.058009,0.008349,0.000000,0.000000
+A0*_attn,unknown_recall_simulated,0.126789,0.046453,0.000000,0.000000
+A0*_attn,known_accuracy,0.867271,0.023474,0.000000,0.000000
+A0*_attn,unknown_recall_genuine,0.968468,0.035753,0.000000,0.000000
