@@ -31,7 +31,19 @@ SCI_RE = re.compile(r"(\d+(?:\.\d+)?)\s*[×xX*]\s*10\s*\^?\s*\(?\s*(-?\d+)\s*\)?
 # 中文数量级后缀，按绝对数值比对（亿=1e8, 万=1e4, 千=1e3）
 UNIT_RE = re.compile(r"(?<![\d.])(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(亿|万|千)")
 UNIT_SCALE = {"亿": 1e8, "万": 1e4, "千": 1e3}
-NUM_RULE_VERSION = "v2(tech_strip+sci_norm+cn_unit+range)"
+# v3：把"数字+单位"先归一到同一量纲再比对，只修"换算正确但校验器只认字面"的误判
+# （原文 3.272e+06 微秒、解释写 3.272 秒）；量级真写错（6.329e+07 写成 6.329亿）仍判未验证。
+UNIT_SUFFIX_RE = re.compile(
+    r"(?<![\d.])(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*"
+    r"(微秒|μs|毫秒|ms|分钟|百万字节|百万|M字节|MB|M包|千字节|K字节|KB|K包|秒)",
+    re.I,
+)
+UNIT_TO_BASE = {
+    "微秒": 1e-6, "μs": 1e-6, "毫秒": 1e-3, "ms": 1e-3, "秒": 1.0, "分钟": 60.0,
+    "百万字节": 1e6, "百万": 1e6, "m字节": 1e6, "mb": 1e6, "m包": 1e6,
+    "千字节": 1e3, "k字节": 1e3, "kb": 1e3, "k包": 1e3,
+}
+NUM_RULE_VERSION = "v3(unit_base+v2)"
 
 # 规则版"解释与预测类别一致"：命中预测类别的关键词即可（粗糙代理指标，非语义判分）
 # strict：必须点出具体类别名，口径最严，仅作对照
@@ -95,6 +107,43 @@ def parse_numbers(text, version=NUM_RULE_VERSION):
         except ValueError:
             pass
     return out
+
+
+def parse_number_tokens(text):
+    """v3：按 token 归组比对。
+
+    - 中文数量级（亿/万/千）：只认归一后的值，防止"6.329亿微秒"这类量级写错的 token
+      靠尾数 6.329 与原文撞值被判成已验证；
+    - 物理单位（微秒/毫秒/秒/分钟/M字节/K包）：原值与归一值都认，避免原文未标单位时
+      （如"流间隔标准差74.1"）解释补单位后被误判。
+    """
+    t = TECH_RE.sub(" ", text or "")
+    t = SCI_RE.sub(lambda m: f"{m.group(1)}e{m.group(2)}", t)
+    unit_at = {}
+    for m in UNIT_SUFFIX_RE.finditer(t):
+        try:
+            unit_at[m.start()] = float(m.group(1)) * UNIT_TO_BASE[m.group(2).lower()]
+        except (ValueError, KeyError):
+            pass
+    cn_at = {}
+    for m in UNIT_RE.finditer(t):
+        try:
+            cn_at[m.start()] = float(m.group(1)) * UNIT_SCALE[m.group(2)]
+        except ValueError:
+            pass
+    tokens = []
+    for m in NUM_RE.finditer(t):
+        try:
+            raw = float(m.group(0))
+        except ValueError:
+            continue
+        if m.start() in cn_at:
+            tokens.append({cn_at[m.start()]})
+        elif m.start() in unit_at:
+            tokens.append({raw, unit_at[m.start()]})
+        else:
+            tokens.append({raw})
+    return tokens
 
 
 def number_in(values, target):
@@ -169,14 +218,25 @@ def main():
     # ---------- 3) 特征引用率 ----------
     ref_ok = 0
     halluc = 0
+    v2_ref_ok = 0
+    v2_halluc = 0
     legacy_ref_ok = 0
     legacy_halluc = 0
+    rescued = []
     ref_details = []
     for r in results:
-        text_nums = parse_numbers(r.get("text_description", ""))
-        exp_nums = parse_numbers(r.get("explanation", ""))
-        cited = [x for x in exp_nums if number_in(text_nums, x)]
-        bad = [x for x in exp_nums if not number_in(text_nums, x)]
+        src_tokens = parse_number_tokens(r.get("text_description", ""))
+        text_nums = sorted({x for tok in src_tokens for x in tok})
+        exp_tokens = parse_number_tokens(r.get("explanation", ""))
+        exp_nums = exp_tokens
+        cited = [tok for tok in exp_tokens if tok & set(text_nums)]
+        bad = [tok for tok in exp_tokens if not (tok & set(text_nums))]
+        v2_text = parse_numbers(r.get("text_description", ""), version="v2")
+        v2_exp = parse_numbers(r.get("explanation", ""), version="v2")
+        v2_bad = [x for x in v2_exp if not number_in(v2_text, x)]
+        v2_cited = [x for x in v2_exp if number_in(v2_text, x)]
+        unit_rescued = [x for x in v2_bad if number_in(text_nums, x)]
+        rescued.extend(unit_rescued)
         legacy_text = parse_numbers(r.get("text_description", ""), version="legacy")
         legacy_exp = parse_numbers(r.get("explanation", ""), version="legacy")
         legacy_bad = [x for x in legacy_exp if not number_in(legacy_text, x)]
@@ -184,13 +244,20 @@ def main():
             ref_ok += 1
         if bad:
             halluc += 1
+        if v2_cited:
+            v2_ref_ok += 1
+        if v2_bad:
+            v2_halluc += 1
         if any(number_in(legacy_text, x) for x in legacy_exp):
             legacy_ref_ok += 1
         if legacy_bad:
             legacy_halluc += 1
         ref_details.append({"sample_index": r["sample_index"], "n_numbers": len(exp_nums),
                            "n_verified": len(cited), "n_unverified": len(bad),
-                           "unverified_tokens": bad[:8], "legacy_unverified_n": len(legacy_bad)})
+                           "unverified_tokens": [sorted(t)[0] for t in bad[:8]],
+                           "v2_unverified_n": len(v2_bad),
+                           "unit_rescued_tokens": unit_rescued[:8],
+                           "legacy_unverified_n": len(legacy_bad)})
 
     # ---------- 4) 类别一致性（规则版） ----------
     consistent = 0
@@ -235,6 +302,14 @@ def main():
             "gate_pass": (ref_ok / n) >= args.min_ref_rate,
             "number_rule_version": NUM_RULE_VERSION,
             "unverified_samples": halluc,
+            "unit_rescued_tokens": len(rescued),
+        },
+        "feature_reference_v2": {
+            "reference_rate": round(v2_ref_ok / n, 4),
+            "unverified_number_rate": round(v2_halluc / n, 4),
+            "gate_pass": (v2_ref_ok / n) >= args.min_ref_rate,
+            "number_rule_version": "v2(tech_strip+sci_norm+cn_unit+range)",
+            "unverified_samples": v2_halluc,
         },
         "feature_reference_legacy": {
             "reference_rate": round(legacy_ref_ok / n, 4),

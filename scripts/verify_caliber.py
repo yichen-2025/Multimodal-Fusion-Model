@@ -36,6 +36,16 @@ from utils.caliber import (
 LEGACY_MARKERS = ("label_space", "metric_scope")
 
 
+def deprecated_report_ids():
+    """台账中已标 deprecated 的报告 id（含 report_ 前缀），重复行检测时排除。"""
+    path = os.path.join(PROJECT_ROOT, "artifacts", "ledger.csv")
+    if not os.path.exists(path):
+        return set()
+    led = pd.read_csv(path, dtype=str).fillna("")
+    sel = led[(led["kind"] == "test_report") & (led["status"] == "deprecated")]
+    return set(sel["id"].astype(str).tolist())
+
+
 def main():
     errors = []
     warnings = []
@@ -94,15 +104,20 @@ def main():
                 except CaliberError as e:
                     warnings.append(f"{rname}: {e}")
 
-    # 3. 重复行检测
+    # 3. 重复行检测（台账已标 deprecated 的行不再计入：重复运行是设计内行为）
     if os.path.exists(idx_path):
         df = pd.read_csv(idx_path, dtype=str)
         dup_keys = [c for c in ["model_id", "dataset_id", "split_id", "openset", "num_classes"] if c in df.columns]
         if dup_keys:
+            dep = deprecated_report_ids()
             dup = df[df.duplicated(subset=dup_keys, keep=False)]
             if not dup.empty:
-                ids = sorted(dup["report_id"].astype(str).tolist())
-                warnings.append(f"reports_index.csv 重复行（同模型同划分同配置）: report_id={ids}")
+                active = dup[~dup["report_id"].astype(str).map(
+                    lambda x: x in dep or f"report_{x}" in dep)]
+                active_dup = active[active.duplicated(subset=dup_keys, keep=False)]
+                if not active_dup.empty:
+                    ids = sorted(active_dup["report_id"].astype(str).tolist())
+                    warnings.append(f"reports_index.csv 重复行（同模型同划分同配置，均未标 deprecated）: report_id={ids}")
 
     # 4. 产物引用一致性：报告引用的 model/split 是否存在、active 产物是否在 live、台账是否自洽
     art_errors, art_warnings = check_artifact_consistency()
