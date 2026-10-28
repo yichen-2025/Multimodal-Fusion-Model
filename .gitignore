@@ -62,3 +62,6 @@ run_history/
 
 # 生成物隔离区（保留台账 artifacts/，但归档内容不入库）
 _archive/
+
+# CTI 原始数据（ATT&CK STIX 全量 JSON，按需从镜像下载，不入库）
+data/cti/
