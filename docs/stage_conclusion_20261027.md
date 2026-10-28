@@ -14,6 +14,7 @@
 | MITRE 映射该用 LLM 还是检索 | 检索显著更优，LLM 只负责叙述 | 同一批 72 条：LLM 40/72、检索 61/72、并集 67/72；McNemar 精确检验 p=0.000324 |
 | 解释一致性 0.56 是否等于质量差 | 否，原规则是词面误杀 | 家族级口径 0.81，strict 口径 0.56，人工抽检 20 条一致 |
 | 解释中的数字是否编造 | 校验器侧误判已基本修完，剩余确为模型量级改写 | 未验证 0.20→0.13→0.11（legacy/v2/v3 三套口径）；A3 关卡 0.05 未达 |
+| unknown 路径解释该怎么做 | LLM 只负责叙述，技术映射取检索 top-3，不依赖模型自选编号 | 100 条引用率 1.00（关卡 ≥0.90）；模型 98/100 返回 null，检索 top-3 命中 21/25（模拟未知）与 20/22（已知类误判） |
 
 ---
 
@@ -83,10 +84,32 @@
 v3 只修"换算正确但校验器只认字面"的误判（`3.272e+06` 微秒写成 `3.272 秒`、`7.309e+06` 字节/秒写成 `7.309M字节/秒`），救回 5 个 token、2 个样本；剩余 22 个 token 是**真量级改写**：`6.329e+07` 写成 `6.329亿`（12 个 token 中的主体）、`1.84e+06` 微秒写成 `1.84万微秒`、`2.03e+04` 包/秒写成 `2.03K包/秒`、`5.602e+06` 微秒写成 `5分钟`；另有 2 个取整/区间表述（`64-122字节` 取整成 64 对原文 `64.25`）和 1 个单位语义错误（`6.378 Mbps` 对原文 `6.378e+04` 字节/秒）。
 **关卡 0.05 未达成**：v3 已把校验器侧的可修误判压到 5 个 token，剩余项全部落在 1.5B 模型的量级改写能力上；唯一有效手段是改 prompt，但实测一致性从 0.81 掉到 0.70、也只能到 0.08，净负收益，已回退（prompt 实验产物在 `_archive/`）。
 
+**C1 unknown 路径接入 LLM 解释（100 条，seed=42，路由报告 `ood_routing_20261027_084942`）**
+
+| 项 | 数字 | 关卡 |
+|---|---|---|
+| `reference_rate`（v3） | 1.00（100/100） | ≥0.90 **PASS** |
+| `unverified_number_rate`（v3） | 0.09（9/100） | 记录 |
+| 空解释 | 0 | — |
+| 路由回归 | `routed` 与 `a3_baseline` 逐位一致，`routing_log` 458=458 | **PASS** |
+
+抽样按 `unknown_origin` 分三层：被误判为未知的已知类 25（总体 226）、真实未知 50（206）、模拟未知 25（26）。未验证率分组为 0.12 / 0.08 / 0.08，说明差异来自样本类型而非提示词泄漏。
+
+**口径修正**：`routing_log` 的 `sample_idx` 是 batch 内下标、不是全局下标，必须用 `ood_score` 与 `all_ood_scores` 做 float32 精确匹配反查全局下标（458/458 命中，行为词元复核 20/20 一致）。直接按 `sample_idx` 索引 CSV 会把 routed 组成误判成"全部为已知类"，C1 抽样与命中率都会失效。
+
+**映射结果：LLM 拒绝指派技术，可信映射来自检索**
+
+| 分组 | LLM 映射 | 检索 top-1 | 检索 top-3 |
+|---|---|---|---|
+| 模拟未知（真值为合并类 3 个技术） | 0/25 | 1/25 | 21/25 |
+| 已知类被误判为未知（真值为原始类） | 0/22 | 13/22 | 20/22 |
+
+模型对 98/100 明确返回 `null`，理由一致：样本既被判为未知，就不应再指派某个已知技术。真实未知组按红线 #6 不计算命中。因此 unknown 路径的展示形态定为"检索 top-3 + LLM 解释文本"：模拟未知组 top-1 只有 4%（真值是 Web 暴力破解集合，BM25 多召回 DoS 类），靠 top-3 才到 84%；已知类误判组 top-1 已有 59%。
+
 ## 6. 已知短板（不通过调阈值掩盖）
 
 - `unknown_recall_simulated=0.0859`、`tpr_at_fpr_1=0.0909`：模拟 unknown 与低 FPR 区间是短板，按红线不调 `distance_type`/`temperature`/`ood_threshold`。
-- unknown 路径解释为确定性模板 `build_cti_explanation`（375/375 非空），与 known 的 LLM 解释形态不同；C 阶段（unknown 接入 LLM）未做，指标不受影响。
+- unknown 路径的映射仍取检索 top-3 而非 LLM 自选：C1 已验证 LLM 能生成合规解释（引用率 1.00），但模型对 98/100 不给技术编号，故形成"检索映射 + LLM 叙述"的混合形态；模板解释保留为兜底。
 - `unverified_number_rate=0.11`（v3 口径，v2 为 0.13）高于 0.05 关卡，属模型能力上限。
 - OOD 的 AUROC 与低 FPR 操作点结论相反（见第 3 节），因此 OOD 侧只保留"无变体双口径优于纯文本"的表述，不给单一排序结论。
 - 72 条子集方差大：一条样本≈1.39pp，所有比例须同时报分子/分母。
@@ -114,6 +137,10 @@ v3 只修"换算正确但校验器只认字面"的误判（`3.272e+06` 微秒写
 /root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/run_ood_routing.py \
   --backbone_model_id 2001 --ood_id 15 --dataset_id 200 --split_id 0 --backbone_variant 'A0*_no_num'
 
+# R6 unknown 路径 LLM 解释（C1）
+/root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/generate_unknown_explanations.py \
+  --routing_report ood_reports/ood_routing_20261027_084942.json --n_samples 100 --seed 42
+
 # R5 口径与台账
 /root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/audit_artifacts.py --check
 /root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/verify_caliber.py
@@ -128,6 +155,7 @@ v3 只修"换算正确但校验器只认字面"的误判（`3.272e+06` 微秒写
 | 解释质量评估（v3 主口径，内含 v2/legacy 对照） | `explanation_results/eval_model2000_20261026_100154_rule_v3.json` |
 | 解释质量评估（v2，历史对照） | `explanation_results/eval_model2000_20261026_100154_rule_v2.json` |
 | 检索评估 | `explanation_results/eval_retrieval_20261026_105616.json` |
+| unknown 路径 LLM 解释（C1，active） | `explanation_results/unknown_explanations_model2011_ood22_20261028_093615.json` |
 | OOD 路由报告 | `ood_reports/ood_routing_20261027_0829..0849.json`（8 份） |
 | OOD 头 | `saved_ood_heads/ood_head_15..22` |
 | 台账 | `artifacts/ledger.csv` |
