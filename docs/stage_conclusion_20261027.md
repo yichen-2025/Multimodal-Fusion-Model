@@ -12,6 +12,7 @@
 |---|---|---|
 | 数值模态是否带来增益 | 无变体在 AUROC 与低 FPR 两个口径上同时优于纯文本，结论维持"无增益"，但也不宣称纯文本更优 | 闭集 concat +0.24pp（配对 t≈1.9, df=2，不显著）；OOD AUROC concat 0.9370±0.0020 vs 纯文本 0.9606±0.0087，而 `tpr@fpr=1%` 0.0840 vs 0.0485 方向相反 |
 | MITRE 映射该用 LLM 还是检索 | 检索显著更优，LLM 只负责叙述 | 同一批 72 条：LLM 40/72、检索 61/72、并集 67/72；McNemar 精确检验 p=0.000324 |
+| 检索 84.9% 是否稳健 | 否，只在 7 条小库上成立，随候选集扩大明显下降 | A 7 条 0.8494（家族 0.9505）；B 10 条 0.4220（家族 0.9471）；C 22 条 0.3331（家族 0.7490），详见 4.1 |
 | 解释一致性 0.56 是否等于质量差 | 否，原规则是词面误杀 | 家族级口径 0.81，strict 口径 0.56，人工抽检 20 条一致 |
 | 解释中的数字是否编造 | 校验器侧误判已基本修完，剩余确为模型量级改写 | 未验证 0.20→0.13→0.11（legacy/v2/v3 三套口径）；A3 关卡 0.05 未达 |
 | unknown 路径解释该怎么做 | LLM 只负责叙述，技术映射取检索 top-3，不依赖模型自选编号 | 100 条引用率 1.00（关卡 ≥0.90）；模型 98/100 返回 null，检索 top-3 命中 21/25（模拟未知）与 20/22（已知类误判） |
@@ -106,6 +107,30 @@ head seed 引入的方差约为 backbone seed 的 1/100 以下，可以忽略；
 - **375 不是任何指标的分布**，是某次路由运行判为未知的条数（不同变体为 458 等），随阈值与模型变化，不应与其他分母并列。
 - 检索语料为 7 条 ATT&CK 技术条目，不含任何样本，**无样本泄漏**；但知识库 `keywords` 在 train/val 上做过一致性核对，test 未参与调参。7 条技术意味着 `hit@1` 是 7 选 1，大模型自选也从这 7 条里挑，两条路径可比。
 
+### 4.1 知识库规模敏感性（2026-10-28）
+
+84.9%（1 474 条全集）建立在 7 条技术条目上。为检验该数值是否只在 7 选 1 的条件下成立，做三臂扩容实验：候选库写成独立文件 `src/explain/kb_candidates.py`，由 `scripts/eval_retrieval.py --kb a|b|c` 显式传入 `BM25Retriever(entries=...)`；`MITRE_KB` 默认内容与 `run_ood_routing` 的解释路径均未改动。
+
+- **A**：原 7 条逐字复制，用于复现基线；
+- **B**：A + 3 条父技术（T1498、T1110、T1059），keywords 取子技术 keywords 的并集（机械生成，不人工撰写）；
+- **C**：B + 12 条网络相关混淆技术（T1595.002、T1499.002、T1110.003/.004、T1071.004、T1095、T1571、T1105、T1048、T1210、T1133、T1203），共 22 条。
+
+| 臂 | 库大小 | strict hit@1 | hit@3 | hit@5 | 家族 hit@1 | 家族 hit@3 |
+|---|---|---|---|---|---|---|
+| A（原 7 条） | 7 | **0.8494** | 0.9498 | 1.0000 | 0.9505 | 0.9661 |
+| B（+3 父技术） | 10 | 0.4220 | 0.9396 | 0.9579 | 0.9471 | 0.9634 |
+| C（+12 混淆项） | 22 | 0.3331 | 0.8535 | 0.8976 | 0.7490 | 0.9532 |
+| C 仅保留行为词元 | 22 | 0.2931 | 0.8535 | 0.8976 | 0.7117 | 0.9532 |
+| C 清空全部 keywords | 22 | 0.3358 | 0.6676 | 1.0000 | 0.5611 | 0.6676 |
+
+- **A 臂逐位复现基线**（0.8494 / 0.9498 / 1.0），说明扩库没有改动检索器与评估逻辑；
+- **B 臂 strict 0.4220（−630 条），家族级 0.9471（−5 条）**：父技术把子技术挤到第 2 位，7、8 两类 strict 由 1.00 变 0，家族级仍为 1.00。父子粒度并存时 strict 会失真，家族级才是可比口径；
+- **C 臂 strict 0.3331、家族级 0.7490（−297 条）**，属实质退化。主要抢占者：T1105 在 1、2 类合计 139 条（与本任务"中等时长、低包速、下行字节偏大"的流量共享行为词元）；T1499.002 在 4 类 120 条（技术名与 T1498.002 几乎同名，但分属端点/网络两个战术）；T1110.003 在 8 类 144 条（同父技术，家族级仍命中）。3 类家族级 150/168、9 类 109/159，原有短板未因扩容进一步恶化；
+- **敏感性对照**：清空全部 keywords 后所有文档得分为 0、排序退化为库内顺序（strict 0.3358、家族 0.5611）；只保留行为词元（`port_/pkt_/dur_/pps_/ack_/syn_`）时为 0.2931 / 0.7117。两者共同说明：查询侧只有 6 类行为词元，检索完全由关键词中的行为词元与文档长度决定，条目中的自然语言描述不参与匹配；
+- **局限**：C 臂 12 条条目的 description/detection/keywords 由本实验按 ATT&CK 语义撰写，行为词元分配属假设前提，因此 C 臂数字是条件结论；若要主张开放候选集上的检索能力，需在完整 ATT&CK 库上重测。
+
+产物：`results/2026-10-28/cti_kb_scale_{a,b,c,c_behavior,c_strip}.json` 与同名 `_points.csv`；汇总 `cti_kb_scale_summary_20261028.{json,csv}`（`scripts/summarize_cti_kb_scale.py`）。
+
 ## 5. 解释质量（A2/A3）
 
 **A2 一致性（同一份 JSON，只换尺子）**
@@ -158,6 +183,7 @@ v3 只修"换算正确但校验器只认字面"的误判（`3.272e+06` 微秒写
 - `unverified_number_rate=0.11`（v3 口径，v2 为 0.13）高于 0.05 关卡，属模型能力上限。
 - OOD 的 AUROC 与低 FPR 操作点结论相反（见第 3 节），因此 OOD 侧只保留"无变体双口径优于纯文本"的表述，不给单一排序结论。
 - 72 条子集方差大：一条样本≈1.39pp，所有比例须同时报分子/分母。
+- 检索 84.9% 依赖 7 条库（见 4.1）：扩到 10 条 strict 0.4220（家族 0.9471），扩到 22 条 strict 0.3331（家族 0.7490）。对外必须连知识库规模一起报，不得表述为开放候选集上的检索能力。
 
 ## 7. 复现命令
 
@@ -199,6 +225,20 @@ v3 只修"换算正确但校验器只认字面"的误判（`3.272e+06` 微秒写
 /root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/bootstrap_ood_ci.py \
   --n_boot 4000 --out results/2026-10-28/bootstrap_ood_ci_20261028.json
 
+# R9 知识库扩容三臂（只读 split，不重训；候选库为独立文件，默认 MITRE_KB 不变）
+/root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/eval_retrieval.py \
+  --backbone_model_id 2000 --dataset_id 200 --split_id 0 --kb a --tag a
+/root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/eval_retrieval.py \
+  --backbone_model_id 2000 --dataset_id 200 --split_id 0 --kb b --tag b
+/root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/eval_retrieval.py \
+  --backbone_model_id 2000 --dataset_id 200 --split_id 0 --kb c --tag c
+/root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/eval_retrieval.py \
+  --backbone_model_id 2000 --dataset_id 200 --split_id 0 --kb c --tag c_behavior --keep_behavior_keywords
+/root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/eval_retrieval.py \
+  --backbone_model_id 2000 --dataset_id 200 --split_id 0 --kb c --tag c_strip --strip_keywords
+/root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/summarize_cti_kb_scale.py \
+  --in_dir results/2026-10-28 --out results/2026-10-28/cti_kb_scale_summary_20261028.json
+
 # R5 口径与台账
 /root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/audit_artifacts.py --check
 /root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/verify_caliber.py
@@ -220,6 +260,9 @@ v3 只修"换算正确但校验器只认字面"的误判（`3.272e+06` 微秒写
 | OOD bootstrap 置信区间（P2，B=4000，含单次运行 CI 与配对差值 CI） | `results/2026-10-28/bootstrap_ood_ci_20261028.json` |
 | OOD 路由报告（P1，16 份） | `ood_reports/ood_routing_20261028_1022..1103.json` |
 | OOD 头（P1） | `saved_ood_heads/ood_head_23..38` |
+| 知识库扩容三臂汇总（A/B/C + 两条敏感性对照） | `results/2026-10-28/cti_kb_scale_summary_20261028.json` / `.csv` |
+| 知识库扩容逐条命中（每条真值 + top1..3 + strict/家族标记） | `results/2026-10-28/cti_kb_scale_{a,b,c,c_behavior,c_strip}_points.csv` |
+| 候选知识库（扩库实验，独立文件） | `src/explain/kb_candidates.py` |
 | 台账 | `artifacts/ledger.csv` |
 | 归档清单 | `_archive/MANIFEST.jsonl` |
 
