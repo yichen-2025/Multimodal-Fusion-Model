@@ -1,0 +1,20 @@
+{
+  "backbone_model_id": 2000,
+  "dataset_id": 200,
+  "split_id": 0,
+  "short_length": 128,
+  "long_length": 256,
+  "n_total": 2040,
+  "n_known": 1655,
+  "changed_total": 3,
+  "changed_rate": 0.0014705882352941176,
+  "known_accuracy_short": 0.9945619335347432,
+  "known_accuracy_long": 0.9939577039274925,
+  "artifact_subset": {
+    "path": "explanation_results/explanations_model2000_20261026_100154.json",
+    "n_samples": 100,
+    "n_known": 81,
+    "n_changed": 0,
+    "changed_indices": []
+  }
+}

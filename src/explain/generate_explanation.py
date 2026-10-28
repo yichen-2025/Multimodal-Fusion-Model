@@ -34,6 +34,7 @@ from src.explain.attack_mapping import (
     get_true_mitre_ids,
 )
 from utils.caliber import read_model_num_classes
+from utils.flow_features import TEXT_MAX_LENGTH
 
 # src/explain/generate_explanation.py -> 上三级为项目根目录
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -237,7 +238,7 @@ def predict_with_backbone(
                 texts,
                 padding=True,
                 truncation=True,
-                max_length=128,
+                max_length=TEXT_MAX_LENGTH,
                 return_tensors="pt",
             )
             input_ids = encodings["input_ids"].to(device)
