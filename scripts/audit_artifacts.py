@@ -485,6 +485,22 @@ def collect():
                 "archive_path": "", "updated_at": now,
             })
             continue
+        if name.startswith("unknown_explanations_"):
+            unk_runs = sorted(glob.glob(os.path.join(EXPL_DIR, "unknown_explanations_*.json")))
+            latest_unk = os.path.basename(unk_runs[-1]) if unk_runs else ""
+            is_latest = name == latest_unk
+            rows.append({
+                "kind": "explanation_eval", "id": name, "path": relpath(path),
+                "status": "active" if is_latest else "deprecated",
+                "reason": ("unknown 路径 LLM 解释（最新一次）：按 unknown_origin 分层抽样，"
+                           "命中率仅对 simulated 与 known-FP 统计") if is_latest
+                          else "unknown 路径解释的早期迭代，已被较新一次取代",
+                "superseded_by": "" if is_latest else latest_unk,
+                "num_classes": "", "split_name": "",
+                "size_bytes": dirsize(path), "digest": digest(path),
+                "archive_path": "", "updated_at": now,
+            })
+            continue
         sampling = ""
         try:
             with open(path, encoding="utf-8") as f:
