@@ -61,6 +61,28 @@
 
 head seed 引入的方差约为 backbone seed 的 1/100 以下，可以忽略；本节与第 3 节"无增益"判读不变。`A0*_add` 唯一例外是 `unknown_recall_simulated`（head 极差 0.00613，backbone 级 0.0522），但该指标本身离散且不参与否定性判读。
 
+### 3.2 bootstrap 置信区间（B=4000，2026-10-28）
+
+抽样单位是 `test.npz` 的 2040 条样本；同一批重采样样本上同时算两个变体（配对），两种方案：**样本级**只重采样样本（"换一批同分布测试样本"的波动），**含 seed** 再对 3 个 backbone run 做有放回重采样（叠加 backbone 波动）。脚本 `scripts/bootstrap_ood_ci.py`，种子 20261028。复算校验：12 次运行的三项指标在全样本上与报告数值最大差 1.1e-16，与报告同口径。
+
+单次运行 95% CI 宽度：`auroc_genuine` 1.46–2.73pp；`tpr@fpr=1%` 4.3–16.6pp（`A0*_add` 的 2012 最宽，因该点正例命中数少）；`unknown_recall_simulated` 5.6–11.3pp。
+
+| 对比（concat 减） | 指标 | 点估计 | 样本级 95% CI | p | 含 seed 95% CI | p |
+|---|---|---|---|---|---|---|
+| 纯文本 | `auroc_genuine` | −2.36pp | [−3.28, −1.48] | <0.001 | [−3.65, −1.11] | <0.001 |
+| 纯文本 | `tpr@fpr=1%` | +3.55pp | [+1.44, +5.48] | 0.001 | [+0.99, +5.93] | 0.012 |
+| 纯文本 | `unknown_recall_simulated` | +5.11pp | [+1.94, +8.66] | <0.001 | [+1.66, +8.96] | 0.004 |
+| add | `auroc_genuine` | −2.37pp | [−3.17, −1.59] | <0.001 | [−4.48, +0.05] | 0.056 |
+| add | `unknown_recall_simulated` | −1.64pp | [−5.04, +1.75] | 0.380 | [−8.07, +4.24] | 0.662 |
+| attn | `auroc_genuine` | +1.27pp | [+0.34, +2.21] | 0.012 | [−0.26, +2.78] | 0.111 |
+| attn | `tpr@fpr=1%` | +2.60pp | [+0.57, +4.52] | 0.015 | [+0.00, +4.97] | 0.053 |
+| attn | `unknown_recall_simulated` | −3.68pp | [−7.14, −0.44] | 0.028 | [−9.55, +2.08] | 0.216 |
+
+**判读更新**：
+- concat 与纯文本的三条差异**都不跨 0**，含 seed 后 p 仍 ≤0.012。即"AUROC 更低、工作点召回更高"两个方向都是真实差异，不是抽样噪声；这与闭集 0.25pp（配对 t，p≈0.19）形成对照——同一个"无增益"命题，在闭集口径下不可检出，在 OOD 两个口径下可检出且方向相反。
+- add、attn 相对 concat 的差异在**计入主干 seed 波动后全部不显著**（p=0.056–0.83）。因此原报告"attn 的 AUROC 最低"只在样本级成立（p=0.012），计入种子波动后不成立（p=0.111），表述应降级为"点估计最低，差异未达显著"。
+- 工作点类指标（`tpr@fpr=1%`、`unknown_recall_simulated`）单次 CI 宽达 4–17pp，单点数值不足以支撑排序，只能配合配对差值使用。
+
 ## 4. 映射路径对比（A1）
 
 同一份解释结果 `explanations_model2000_20261026_100154.json` 的 72 条攻击样本（`true_mitre_ids` 非空）：
@@ -173,6 +195,10 @@ v3 只修"换算正确但校验器只认字面"的误判（`3.272e+06` 微秒写
 /root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/summarize_ood_multiseed.py \
   --out results/2026-10-28/ood_multiseed_summary_20261028.json
 
+# R8 OOD bootstrap 置信区间（P2，只读报告，不重跑训练）
+/root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/bootstrap_ood_ci.py \
+  --n_boot 4000 --out results/2026-10-28/bootstrap_ood_ci_20261028.json
+
 # R5 口径与台账
 /root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/audit_artifacts.py --check
 /root/miniconda3/bin/python run.py /root/miniconda3/bin/python scripts/verify_caliber.py
@@ -191,6 +217,7 @@ v3 只修"换算正确但校验器只认字面"的误判（`3.272e+06` 微秒写
 | OOD 路由报告 | `ood_reports/ood_routing_20261027_0829..0849.json`（8 份） |
 | OOD 头 | `saved_ood_heads/ood_head_15..22` |
 | OOD head seed 扩展汇总（P1，ddof=1 两级统计） | `results/2026-10-28/ood_multiseed_summary_20261028.json` |
+| OOD bootstrap 置信区间（P2，B=4000，含单次运行 CI 与配对差值 CI） | `results/2026-10-28/bootstrap_ood_ci_20261028.json` |
 | OOD 路由报告（P1，16 份） | `ood_reports/ood_routing_20261028_1022..1103.json` |
 | OOD 头（P1） | `saved_ood_heads/ood_head_23..38` |
 | 台账 | `artifacts/ledger.csv` |
