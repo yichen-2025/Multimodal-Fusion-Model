@@ -3,6 +3,10 @@
 > 依据：`todos/todo_1.md`（总实施计划）+ `todos/Phase 1实现.md`（Phase 1 落地总结）
 > 分支：`exp/openworld-fewshot`
 
+> **状态更新（2026-11-03）——P1.4 少样本线已停用**
+>
+> `split_data/dataset_200/` 下不存在 `split_fewshot_*` 划分（仅 `dataset_0` 有，且测试集 8352 条与当前口径不兼容），因此少样本场景**从未在当前数据集上验证**；本文档中的 `dataset_1` 划分与 `split_fewshot_k_0` 已不存在。**本文档自此仅作历史设计记录**，其中的命令、目录名与「少样本」相关结论均不再可直接执行或引用。当前开集结论见 `docs/stage_conclusion_20261103.md`。
+
 ---
 
 ## 一、项目一句话定位

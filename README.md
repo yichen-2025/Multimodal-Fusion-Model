@@ -1,6 +1,6 @@
 # 多模态融合网络流量分类模型
 
-基于多模态融合的网络流量恶意检测模型，结合统计特征模态和文本描述模态进行流量分类，并支持消融实验以验证各模态的有效性。项目当前已拓展至**开集未知攻击检测**与**少样本学习**场景，旨在证明LLM在复杂场景下的独特优势。
+基于多模态融合的网络流量恶意检测模型，结合统计特征模态和文本描述模态进行流量分类，并支持消融实验以验证各模态的有效性。项目当前已拓展至**开集未知攻击检测**场景，并以 A3 对照检验「LLM 主干是否更优」这一立项假设（结论见 `docs/stage_conclusion_20261103.md`）。
 
 ## 项目简介
 
@@ -16,8 +16,7 @@
 - **多模态融合**：数值特征与文本语义特征在 LLM 外部高效融合
 - **LLM 文本编码器（路线 B）**：Qwen2.5-1.5B 冻结底座 + 可选 LoRA（q/v，r=8）作为文本编码器，A0\* 变体启用
 - **闭集消融**：支持 A3 / A0 / A0\* / A0_frozen / A0\*_no_num / A0\*_no_text 六变体对比
-- **开集检测 (OOD)**：基于类原型距离检测未知攻击（研究中，见 Phase 1）
-- **少样本学习**：支持 k=5/10/20 等少样本训练配置
+- **开集检测 (OOD)**：基于类原型距离检测未知攻击（见 Phase 1）
 
 ## 闭集消融变体（6 变体故事线）
 
@@ -54,9 +53,7 @@ Multimodal-Fusion-Model/
 │   ├── make_openset_split.py      # [P1.1] 构造开集数据集划分
 │   ├── train_ood_head.py          # [P1.3] 训练OOD检测头
 │   ├── run_ood_routing.py         # [P1.4] OOD路由评估
-│   ├── make_fewshot.py            # [P1.2] 构造少样本数据
 │   ├── report_generator.py       # [P1.5] 结果汇总报告生成器
-│   └── run_openworld_experiment.py # [P1.5] 开集少样本全流程实验
 │
 ├── tools/                         # 工具脚本
 │   ├── download_bert.py           # BERT模型下载脚本
@@ -232,9 +229,11 @@ python scripts/run_ablation.py --dataset_id 3 --split_id 0
 > **数据集 ID 说明**：当前分支 `split_data/` 含 `dataset_0/2/3/4/5`（多分类，12/15 类），旧分支的 `dataset_1` 已不存在；请以 `split_data/` 下实际存在的 ID 为准，推荐 **dataset_3（15 类，最难）** 为闭集主基准、**dataset_0（12 类）** 为复现。
 > 完整命令参数与开集（P1）流程见 `implementation_guide.md`。
 
-## Phase 1: 开集未知攻击检测 + 少样本学习（研究中，尚未跑通）
+## Phase 1: 开集未知攻击检测
 
-> **状态（2026-09-03）**：本阶段对应项目 Phase 1 主假设——「开集（未知攻击）场景下，以 LLM 作文本编码器的主干（A0\*）融合特征，比无 LLM 主干（A3）具有更好的分布外（OOD）可分性，从而在 **Unknown F1 / AUROC** 上显著更优」。该假设**尚未被有效验证**：2026-08-28 的一次探索性运行因 OOD 脚本集成缺陷（`unknown_f1=0.0`）已失效，结论须重做。
+> **更新（2026-11-03）**：A3 对照实验已在 `dataset_200` / `split_openset_0` 上完成（3 主干 × 3 头），结论为「A3 与 A0\*_no_num 统计上不可区分；与 A0\* 呈 AUROC 更高 / 低误报召回更低的 trade-off」，详见 `docs/stage_conclusion_20261103.md`。本节其余内容（dataset_3 命令、08-28 失效运行、脚本 BUG 清单）是 2026-09-03 的历史记录，与当前口径不一致，待重写。
+
+> **状态（2026-09-03，历史）**：本阶段对应项目 Phase 1 主假设——「开集（未知攻击）场景下，以 LLM 作文本编码器的主干（A0\*）融合特征，比无 LLM 主干（A3）具有更好的分布外（OOD）可分性，从而在 **Unknown F1 / AUROC** 上显著更优」。写下这段时该假设**尚未被有效验证**（2026-08-28 的一次探索性运行因 OOD 脚本集成缺陷 `unknown_f1=0.0` 已失效）；**该假设已于 2026-11-03 用 A3 对照检验，结论见上方更新与 `docs/stage_conclusion_20261103.md`**。
 >
 > **方法调整（重要）**：原计划中「未知样本交由 LLM 生成式路由做语义推理」的设计存在**结构性缺陷**（闭集 `argmax` 永远无法输出 `unknown`，见下方 BUG D），已决定**放弃生成式路由**，改为更干净、可直接支撑假设的方案：**所有主干共用同一个原型距离 OOD 头，公平对比「主干特征质量」**（A3 vs A0_frozen vs A0\*）。
 
@@ -282,46 +281,36 @@ python scripts/make_openset_split.py --dataset_id 3 --source_split_id 0 --simula
 
 产物：`split_data/dataset_3/split_openset_0/`（train/val 不含未知，test 含 `unknown`）
 
-#### Step 2 — 构造少样本数据
-
-```bash
-python scripts/make_fewshot.py --dataset_id 3 --source_split_id 0 --k_values 5
-python scripts/make_fewshot.py --dataset_id 3 --source_split_id 0 --k_values 10
-python scripts/make_fewshot.py --dataset_id 3 --source_split_id 0 --k_values 20
-```
-
-产物：`split_data/dataset_3/split_fewshot_<k>_0/`
-
-#### Step 3 — 训练 OOD 检测头（在 A3 / A0_frozen / A0\* 主干上各训一个）
+#### Step 2 — 训练 OOD 检测头（在 A3 / A0_frozen / A0\* 主干上各训一个）
 
 ```bash
 # 先确保对应闭集主干已训好存档
-python scripts/train_ood_head.py --model_id <A3_id>       --dataset_id 3 --split_id 0 --variant A3        --fewshot_k 5
-python scripts/train_ood_head.py --model_id <A0*_id>      --dataset_id 3 --split_id 0 --variant A0*       --fewshot_k 5
-python scripts/train_ood_head.py --model_id <A0_frozen_id> --dataset_id 3 --split_id 0 --variant A0_frozen --fewshot_k 5
+python scripts/train_ood_head.py --model_id <A3_id>       --dataset_id 3 --split_id 0 --variant A3
+python scripts/train_ood_head.py --model_id <A0*_id>      --dataset_id 3 --split_id 0 --variant A0*
+python scripts/train_ood_head.py --model_id <A0_frozen_id> --dataset_id 3 --split_id 0 --variant A0_frozen
 ```
 
 产物：`saved_ood_heads/ood_<id>/`（原型向量 + 阈值）
 
-#### Step 4 — 评测（OOD 头特征质量对比）
+#### Step 3 — 评测（OOD 头特征质量对比）
 
 ```bash
 python scripts/run_ood_routing.py \
     --backbone_model_id <A0*_id> \
     --ood_id <ood_id> \
-    --dataset_id 3 --split_id 0 --fewshot_k 5
+    --dataset_id 3 --split_id 0
 ```
 
 产物：`ood_reports/ood_routing_<时间戳>.json`（Unknown F1 / AUROC / Macro-F1 / Recall）
 
-#### Step 5 — 生成汇总报告
+#### Step 4 — 生成汇总报告
 
 ```bash
 python scripts/report_generator.py
 ```
 
 产物：
-- `openworld_fewshot.csv` 按 k 值 / 主干汇总对比
+- `openworld_summary.csv` 按主干汇总对比
 - `openworld_experiment_summary_<ts>.md` 可读 Markdown 报告
 - `openworld_metrics_<timestamp>.json` 结构化指标
 
@@ -371,7 +360,6 @@ python scripts/report_generator.py
 | 开集划分 | `logs/openset_split/` | 开集划分配置与样本统计 |
 | OOD训练 | `logs/ood_training/` | OOD头训练过程与指标 |
 | OOD路由 | `logs/ood_routing/` | OOD路由评估结果 |
-| 少样本划分 | `logs/fewshot_split/` | 少样本划分配置与样本统计 |
 | 完整实验 | `logs/experiment/` | 完整实验运行记录 |
 
 ### 测试脚本
@@ -392,9 +380,13 @@ python -m pytest tests/test_project.py -v
 4. **LLM 文本编码器（非分类器）**：Qwen2.5-1.5B 冻结底座 + 可选 LoRA（A0\* 启用），仅负责把中文文本编码成向量，分类由后续分类头完成
 5. **闭集消融**：通过控制数值/文本/LLM/LoRA 的开关（6 变体），验证各组件对分类性能的贡献
 6. **开集检测 (OOD)**：基于类原型距离检测未知攻击样本，实现开集识别（研究中）
-7. **少样本学习**：在少量训练样本（k=5/10/20）下验证模型泛化能力
 
 模型架构参考 `原理图.png`，数据处理流程参考 `数据集处理流程图.png`。
+## 适用边界
+
+- **少样本线（Phase 1.4）未在当前数据集上验证**：`split_data/dataset_200/` 下不存在 `split_fewshot_*` 划分；`split_data/dataset_0/` 的旧划分（测试集 8352 条）与当前口径不兼容。因此本仓库不给出少样本结论，仅保留 `scripts/make_fewshot.py` 的构造能力。
+- 所有指标来自同分布随机切分（`dataset_200` / `split_openset_0`），未做分布外推检验；A3 对照结论的置信度受 backbone seed n=3 限制。
+
 ## 生成物台账
 
 `saved_models/`、`saved_ood_heads/`、`test_reports/`、`ood_reports/` 中哪些产物有效、哪些仅为历史证据，统一以 [artifacts/README.md](artifacts/README.md) 与 `artifacts/ledger.csv` 为准。审查代码或引用历史指标前请先读台账。
