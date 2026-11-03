@@ -30,6 +30,7 @@ VARIANTS = {
     "A0*": [14, 17, 18],
     "A0*_add": [12, 19, 20],
     "A0*_attn": [13, 21, 22],
+    "A3": [39, 42, 45],
 }
 
 
@@ -178,30 +179,28 @@ def main():
                 pt["tpr_at_fpr_1"], *sample_ci[(v, r["ood_id"])]["tpr_at_fpr_1"],
                 pt["unknown_recall_simulated"], *sample_ci[(v, r["ood_id"])]["unknown_recall_simulated"]))
 
-    # 3) 配对 bootstrap：concat vs 其它变体
+    # 3) 配对 bootstrap：A0* vs 其它变体；A3 vs A0* / A0*_no_num
     print("\n" + "=" * 100)
     print("差值 95% CI（配对 bootstrap：同一重采样样本，两个变体同口径比较）")
     print("=" * 100)
-    # 预先算好每个 run 在全样本上的分数，<1> 里逐次重采样
-    variants = ["A0*_no_num", "A0*_add", "A0*_attn"]
-    diff_res = {}
-    for other in variants:
+
+    def diff_between(ref_name, other_name):
         dst = {k: [] for k in metrics}
         dst_h = {k: [] for k in metrics}
         for _ in range(args.n_boot):
             idx = rng.integers(0, n, n)
-            a = [compute(idx, r["score"], m) for r, m in zip(runs["A0*"], ms["A0*"])]
-            b = [compute(idx, r["score"], m) for r, m in zip(runs[other], ms[other])]
+            a = [compute(idx, r["score"], m) for r, m in zip(runs[ref_name], ms[ref_name])]
+            b = [compute(idx, r["score"], m) for r, m in zip(runs[other_name], ms[other_name])]
             for k in metrics:
                 av = [x[k] for x in a if x[k] is not None]
                 bv = [x[k] for x in b if x[k] is not None]
                 if av and bv:
                     dst[k].append(float(np.mean(av) - np.mean(bv)))
             # 叠加 run 级重采样（纳入 backbone seed 波动）
-            ra = rng.integers(0, len(runs["A0*"]), len(runs["A0*"]))
-            rb = rng.integers(0, len(runs[other]), len(runs[other]))
-            a2 = [compute(idx, runs["A0*"][j]["score"], ms["A0*"][j]) for j in ra]
-            b2 = [compute(idx, runs[other][j]["score"], ms[other][j]) for j in rb]
+            ra = rng.integers(0, len(runs[ref_name]), len(runs[ref_name]))
+            rb = rng.integers(0, len(runs[other_name]), len(runs[other_name]))
+            a2 = [compute(idx, runs[ref_name][j]["score"], ms[ref_name][j]) for j in ra]
+            b2 = [compute(idx, runs[other_name][j]["score"], ms[other_name][j]) for j in rb]
             for k in metrics:
                 av = [x[k] for x in a2 if x[k] is not None]
                 bv = [x[k] for x in b2 if x[k] is not None]
@@ -210,10 +209,10 @@ def main():
 
         point = {}
         for k in metrics:
-            pa = np.mean([compute(np.arange(n), r["score"], m)[k] for r, m in zip(runs["A0*"], ms["A0*"])])
-            pb = np.mean([compute(np.arange(n), r["score"], m)[k] for r, m in zip(runs[other], ms[other])])
+            pa = np.mean([compute(np.arange(n), r["score"], m)[k] for r, m in zip(runs[ref_name], ms[ref_name])])
+            pb = np.mean([compute(np.arange(n), r["score"], m)[k] for r, m in zip(runs[other_name], ms[other_name])])
             point[k] = float(pa - pb)
-        diff_res[other] = {
+        res = {
             k: {
                 "point": point[k],
                 "ci_sample": [float(np.percentile(dst[k], 2.5)), float(np.percentile(dst[k], 97.5))],
@@ -223,12 +222,16 @@ def main():
             } for k in metrics
         }
         for k in metrics:
-            r0 = diff_res[other][k]
-            print("%-11s %-25s diff=%+7.2fpp  CI[%.2f, %.2f] p=%.4f   (含 seed) CI[%.2f, %.2f] p=%.4f" % (
-                other, k, r0["point"] * 100, r0["ci_sample"][0] * 100, r0["ci_sample"][1] * 100,
+            r0 = res[k]
+            print("%-22s %-25s diff=%+7.2fpp  CI[%.2f, %.2f] p=%.4f   (含 seed) CI[%.2f, %.2f] p=%.4f" % (
+                ref_name + " - " + other_name, k, r0["point"] * 100, r0["ci_sample"][0] * 100, r0["ci_sample"][1] * 100,
                 r0["p_sample_two_sided"],
                 r0["ci_sample_plus_seed"][0] * 100, r0["ci_sample_plus_seed"][1] * 100,
                 r0["p_sample_plus_seed_two_sided"]))
+        return res
+
+    diff_res = {other: diff_between("A0*", other) for other in ("A0*_no_num", "A0*_add", "A0*_attn")}
+    diff_a3 = {other: diff_between("A3", other) for other in ("A0*", "A0*_no_num")}
 
     summary = {
         "n_boot": args.n_boot,
@@ -237,6 +240,7 @@ def main():
         "runs": {v: [{"ood_id": r["ood_id"], "report": r["report"]} for r in rs] for v, rs in runs.items()},
         "single_run_ci": {"%s|%d" % k: v for k, v in sample_ci.items()},
         "diff_vs_concat": diff_res,
+        "diff_A3": diff_a3,
         "recompute_mismatch": bad,
     }
     if args.out:
