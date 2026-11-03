@@ -23,7 +23,7 @@ from src.model_architectures.ood_head import OODHead
 from src.data.data_loader import load_split_data, collate_fn
 from src.explain.retriever import build_cti_explanation
 from utils.log_utils import save_log
-from utils.caliber import CaliberError
+from utils.caliber import CaliberError, read_model_variant
 
 # P0-1: 固定种子，确保 eval 可复现（ood_head 已去扰动）
 torch.manual_seed(42)
@@ -165,7 +165,7 @@ def run_ood_routing(
     dataset_id=0,
     split_id=0,
     model_path=None,
-    backbone_variant="A3",
+    backbone_variant=None,
     llm_variant="A0",
     batch_size=32,
     verbose=True,
@@ -193,7 +193,7 @@ def run_ood_routing(
         dataset_id (int): 数据集ID
         split_id (int): 划分ID
         model_path (str): LLM模型路径
-        backbone_variant (str): backbone变体（默认A3）
+        backbone_variant (str): backbone变体（None 时从模型 config.txt 读取）
         llm_variant (str): LLM变体（默认A0）
         batch_size (int): batch大小
         verbose (bool): 打印详细信息
@@ -226,6 +226,10 @@ def run_ood_routing(
     backbone_path = os.path.join(PROJECT_ROOT, "saved_models", f"model_{backbone_model_id}")
     if not os.path.exists(backbone_path):
         raise FileNotFoundError(f"Backbone模型不存在: {backbone_path}")
+
+    variant_source = "arg" if backbone_variant is not None else "config"
+    if backbone_variant is None:
+        backbone_variant = read_model_variant(backbone_path)
 
     backbone = MultiModalFusionModel.from_pretrained(model_path, backbone_path)
     backbone.eval()
@@ -600,6 +604,7 @@ def run_ood_routing(
         'ood_id': ood_id,
         'llm_model_id': llm_model_id,
         'backbone_variant': backbone_variant,
+        'variant_source': variant_source,
         'llm_variant': llm_variant,
         'total_test': len(all_labels_collected),
         'routed': {
@@ -733,8 +738,8 @@ if __name__ == "__main__":
                         help="划分ID（对应split_openset_{id}）")
     parser.add_argument("--model_path", type=str, default=None,
                         help="LLM模型路径")
-    parser.add_argument("--backbone_variant", type=str, default="A3",
-                        help="Backbone变体（默认A3）")
+    parser.add_argument("--backbone_variant", type=str, default=None,
+                        help="Backbone变体（默认从模型 config.txt 读取）")
     parser.add_argument("--llm_variant", type=str, default="A0",
                         help="LLM变体（默认A0）")
     parser.add_argument("--batch_size", type=int, default=32,

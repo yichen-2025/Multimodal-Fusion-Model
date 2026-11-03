@@ -47,6 +47,18 @@ def read_openset_flag(model_dir: str) -> bool:
     return False
 
 
+def read_model_variant(model_dir: str) -> str:
+    """从模型 config.txt 读取 variant。禁止用 argparse 默认值代替。"""
+    cfg = os.path.join(model_dir, "config.txt")
+    if not os.path.exists(cfg):
+        raise CaliberError(f"缺少模型配置: {cfg}，禁止猜测 variant")
+    with open(cfg, encoding="utf-8") as f:
+        for line in f:
+            if line.strip().startswith("variant:"):
+                return line.split(":", 1)[1].strip()
+    raise CaliberError(f"{cfg} 中未找到 variant")
+
+
 def assert_classifier_dim(model, num_classes: int):
     """断言分类头维度与配置一致。"""
     out_dim = getattr(model, "num_classes", None)

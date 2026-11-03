@@ -50,9 +50,18 @@ POINTS = [
     ("A0*_attn", 2010, 123, 44, 36),
     ("A0*_attn", 2011, 456, 43, 37),
     ("A0*_attn", 2011, 456, 44, 38),
+    ("A3", 3001, 42, 42, 39),
+    ("A3", 3001, 42, 43, 40),
+    ("A3", 3001, 42, 44, 41),
+    ("A3", 3002, 123, 42, 42),
+    ("A3", 3002, 123, 43, 43),
+    ("A3", 3002, 123, 44, 44),
+    ("A3", 3003, 456, 42, 45),
+    ("A3", 3003, 456, 43, 46),
+    ("A3", 3003, 456, 44, 47),
 ]
 
-VARIANTS = ["A0*_no_num", "A0*", "A0*_add", "A0*_attn"]
+VARIANTS = ["A3", "A0*_no_num", "A0*", "A0*_add", "A0*_attn"]
 METRICS = ["auroc_genuine", "tpr_at_fpr_1", "unknown_recall_simulated",
            "known_accuracy", "unknown_recall_genuine"]
 
@@ -134,8 +143,8 @@ def main():
 
     by_name = {x["variant"]: x for x in out_variants}
 
-    def compare(other):
-        a, b = by_name.get("A0*"), by_name.get(other)
+    def compare(a_name, b_name):
+        a, b = by_name.get(a_name), by_name.get(b_name)
         if not a or not b:
             return None
         out = {}
@@ -163,7 +172,8 @@ def main():
         "metrics": METRICS,
         "points": rows,
         "variants": out_variants,
-        "compare_A0*_vs": {v: compare(v) for v in ("A0*_no_num", "A0*_add", "A0*_attn")},
+        "compare_A0*_vs": {v: compare("A0*", v) for v in ("A3", "A0*_no_num", "A0*_add", "A0*_attn")},
+        "compare_A3_vs": {v: compare("A3", v) for v in ("A0*", "A0*_no_num")},
     }
 
     print("=" * 104)
@@ -189,13 +199,15 @@ def main():
 
     print("=" * 104)
     print("关键对比（A0*/concat 减其它变体；倍数以 backbone 级 sd 为尺）")
-    for name, cmp in summary["compare_A0*_vs"].items():
-        if not cmp:
-            continue
-        for k, c in cmp.items():
-            print("%-14s %-26s diff=%+6.2fpp  sd_A0*=%.5f sd_other=%.5f  max倍数=%.1f pooled倍数=%.1f" % (
-                name, k, c["diff_pp"], c["sd_A0*"], c["sd_other"],
-                c["ratio_max_sd"], c["ratio_pooled_sd"]))
+    for prefix, comps in (("A0* - ", summary["compare_A0*_vs"]),
+                          ("A3 - ", summary["compare_A3_vs"])):
+        for name, cmp in comps.items():
+            if not cmp:
+                continue
+            for k, c in cmp.items():
+                print("%-14s %-26s diff=%+6.2fpp  sd_A0*=%.5f sd_other=%.5f  max倍数=%.1f pooled倍数=%.1f" % (
+                    prefix + name, k, c["diff_pp"], c["sd_A0*"], c["sd_other"],
+                    c["ratio_max_sd"], c["ratio_pooled_sd"]))
 
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
