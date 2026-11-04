@@ -65,3 +65,10 @@ _archive/
 
 # CTI 原始数据（ATT&CK STIX 全量 JSON，按需从镜像下载，不入库）
 data/cti/
+
+# local state doc (not committed)
+STATE.md
+GOAL.md
+
+# 台账备份（本地留档，不入库）
+artifacts/*.bak.*

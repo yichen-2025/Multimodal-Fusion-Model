@@ -16,13 +16,17 @@ backbone_model_id），不记录产物状态；而 `saved_models/` 里曾经同�
 | deprecated | 历史实验 / 旧口径 / 重复运行，仅作证据 | 模型与头在 `_archive/`，报告原地保留 |
 | invalid | 引用悬空或无法解析 | 模型与头在 `_archive/` |
 
-## 当前 active 产物（2026-10-22 生成）
+## 当前 active 产物（2026-11-03 更新）
 
-- 模型：`model_102`（11 类闭集基线，report_15）；`model_1000`–`model_1011`（融合/LLM 对比，report_1–12）
-- 报告：`report_1`–`report_13`、`report_15`
-- 划分：`split_data/dataset_0/split_0`（闭集）、`split_openset_0`（开集）、`split_fewshot_*`
-- OOD 头：**无 active**。144 份 `ood_reports` 全部基于缺少 `unknown_origin` 的旧划分，
-  unknown 指标是"真实 OOD + 模拟 unknown"混合口径，不能当作真实 OOD 能力。
+> 数字随 `python scripts/audit_artifacts.py --apply` 刷新；逐条明细以 `ledger.csv` 为准。
+
+- 模型 28 个 active，其中 A3 对照为 `model_3001`–`model_3003`（无 LLM 的 BERT+数值基线）。
+- 测试报告 26 份 active；划分 8 个 active（`dataset_0/split_0`、`dataset_200/split_openset_0`、
+  `split_fewshot_*` 等）。
+- OOD 头 41 个 active、OOD 报告 42 份 active。A3 的 9 个头（`ood_head_39`–`ood_head_47`）与 9 份
+  `ood_reports/ood_routing_20261103_0940*`–`0942*` 支撑 `docs/stage_conclusion_20261103.md`。
+- 仍为 deprecated 的 144 份 OOD 报告多基于缺少 `unknown_origin` 的旧划分，unknown 指标是
+  "真实 OOD + 模拟 unknown"混合口径，不能当作真实 OOD 能力。
 
 ## 已隔离产物
 

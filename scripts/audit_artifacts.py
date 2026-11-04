@@ -56,6 +56,18 @@ MAIN_DATASET_MIN_MODELS = 5
 
 # 人工状态覆盖：经复核确认的结论，不随报告引用关系自动判定，保证台账可重建且稳定。
 FORCED_MODEL_STATUS = {
+    3001: ("active",
+           "A3 对照 backbone（seed 42，无 LLM）；闭集/OOD 指标见 "
+           "docs/stage_conclusion_20261103.md §3–§4，路由报告 ood_routing_20261103_0940*",
+           ""),
+    3002: ("active",
+           "A3 对照 backbone（seed 123，无 LLM）；闭集/OOD 指标见 "
+           "docs/stage_conclusion_20261103.md §3–§4，路由报告 ood_routing_20261103_0941*",
+           ""),
+    3003: ("active",
+           "A3 对照 backbone（seed 456，无 LLM）；闭集/OOD 指标见 "
+           "docs/stage_conclusion_20261103.md §3–§4，路由报告 ood_routing_20261103_0942*",
+           ""),
     2008: ("invalid",
            "checkpoint 不含 LoRA adapter（state_dict 缺陷），早停恢复不一致，"
            "闭集 known_acc 0.8508 不可用；非 add 变体不稳定",
@@ -320,6 +332,10 @@ def collect():
 
     active_models = {int(reports[rid]["model_id"]) for rid in reports
                      if report_status.get(rid) == "active"}
+    # 人工覆盖为 active 的模型同样计入 active_models，否则其 OOD 报告与头会被连带降级。
+    # A3 的闭集指标写在路由报告里，仓库没有对应 test_report，只能走人工覆盖。
+    active_models |= {mid for mid, (st, _r, _s) in FORCED_MODEL_STATUS.items()
+                      if st == "active"}
     invalid_models = {int(reports[rid]["model_id"]) for rid in reports
                       if report_status.get(rid) == "invalid"}
 
