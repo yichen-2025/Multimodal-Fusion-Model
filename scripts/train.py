@@ -80,6 +80,9 @@ VARIANT_CONFIGS = {
     "A0*_add":    {"use_numeric": True,  "use_bert": False, "use_llm": True,  "fusion_type": "add",       "bert_trainable": False, "llm_use_lora": True},
     "A0*_attn":   {"use_numeric": True,  "use_bert": False, "use_llm": True,  "fusion_type": "attention", "bert_trainable": False, "llm_use_lora": True},
     "A3_add":     {"use_numeric": True,  "use_bert": True,  "use_llm": False, "fusion_type": "add",       "bert_trainable": False, "llm_use_lora": False},
+    # ── 公平编码器对照（plan/2026-11-03）──
+    "A0*_last":   {"use_numeric": True,  "use_bert": False, "use_llm": True,  "fusion_type": "concat", "bert_trainable": False, "llm_use_lora": True, "llm_pooling": "last"},
+    "A3_adapter": {"use_numeric": True,  "use_bert": True,  "use_llm": False, "fusion_type": "concat", "bert_trainable": False, "llm_use_lora": False, "text_adapter": True},
     # 第三阶段改进消融（在A0基础上）
     "B0": {"use_focal_loss": False, "use_prototype_learning": False, "use_augmentation": False},
     "B1": {"use_focal_loss": True,  "use_prototype_learning": False, "use_augmentation": False},
@@ -103,6 +106,8 @@ VARIANT_DESCRIPTIONS = {
     "A0*_add":   "融合消融：A0*主基线 + add融合（其余配置同A0*）",
     "A0*_attn":  "融合消融：A0*主基线 + attention融合（其余配置同A0*，维度已修复保证兼容）",
     "A3_add":    "融合消融：A3对照 + add融合（可选补充，无LLM，文本走BERT）",
+    "A0*_last":  "公平对照：A0* 主基线换 last-token pooling（其余配置同A0*）",
+    "A3_adapter":"公平对照：A3 + 文本 adapter（无LLM，文本走BERT，其余同A3）",
     "B0": "基线模型（无第三阶段改进）",
     "B1": "仅Focal Loss",
     "B2": "仅原型对比学习",
@@ -434,6 +439,8 @@ def train_model(model_path=None,
                 llm_use_lora=None,
                 lora_r=8,
                 lora_alpha=16,
+                llm_pooling=None,
+                text_adapter=None,
                 openset=False):
     """
     训练多模态融合模型
@@ -473,6 +480,8 @@ def train_model(model_path=None,
         use_augmentation (bool): 是否使用数值特征数据增强
         aug_noise_std (float): 数据增强高斯噪声标准差
         aug_prob (float): 数据增强应用概率
+        llm_pooling (str): LLM 文本池化方式 mean/last；None 时取变体配置（默认 mean）
+        text_adapter (bool): 是否在文本分支后接 adapter；None 时取变体配置（默认 False）
         
     Returns:
         MultiModalFusionModel: 训练完成的模型
@@ -493,6 +502,11 @@ def train_model(model_path=None,
             fusion_type = config['fusion_type']
             bert_trainable = config['bert_trainable']
             llm_use_lora = config.get('llm_use_lora', True)  # 默认用 LoRA
+            # 文本池化 / adapter：变体配置优先，CLI 显式传值再覆盖
+            if llm_pooling is None:
+                llm_pooling = config.get('llm_pooling', 'mean')
+            if text_adapter is None:
+                text_adapter = config.get('text_adapter', False)
         # B系列：第三阶段改进消融（使用A0作为基础配置）
         elif variant.startswith('B'):
             base_config = VARIANT_CONFIGS['A0']
@@ -509,6 +523,10 @@ def train_model(model_path=None,
                 use_prototype_learning = config['use_prototype_learning']
             if 'use_augmentation' in config:
                 use_augmentation = config['use_augmentation']
+            if llm_pooling is None:
+                llm_pooling = 'mean'
+            if text_adapter is None:
+                text_adapter = False
     else:
         # 使用显式传入的参数，默认全部开启
         if use_numeric is None:
@@ -519,6 +537,10 @@ def train_model(model_path=None,
             use_llm = True
         if llm_use_lora is None:
             llm_use_lora = True  # 默认开启 LoRA
+        if llm_pooling is None:
+            llm_pooling = 'mean'
+        if text_adapter is None:
+            text_adapter = False
 
     # 无LLM变体不需要GPU强制检查
     if use_llm:
@@ -557,6 +579,10 @@ def train_model(model_path=None,
     print(f"  - LLM: {'开启' if use_llm else '关闭'}")
     print(f"  - 融合策略: {fusion_type}")
     print(f"  - BERT可训练: {'是' if bert_trainable else '否'}")
+    if use_llm:
+        print(f"  - LLM 池化: {llm_pooling}")
+    if text_adapter:
+        print(f"  - 文本 adapter: 开启")
     print(f"  - 模型保存路径: {save_path}")
 
     train_dataset = load_split_data(data_dir=os.path.join(PROJECT_ROOT, "split_data"), data_type="train", 
@@ -641,6 +667,8 @@ def train_model(model_path=None,
         llm_use_lora=llm_use_lora,
         lora_r=lora_r,
         lora_alpha=lora_alpha,
+        llm_pooling=llm_pooling,
+        text_adapter=text_adapter,
     )
     
     # 无LLM时不需要tokenizer
@@ -791,6 +819,8 @@ def train_model(model_path=None,
         f.write(f"llm_use_lora: {llm_use_lora}\n")
         f.write(f"lora_r: {lora_r}\n")
         f.write(f"lora_alpha: {lora_alpha}\n")
+        f.write(f"llm_pooling: {llm_pooling}\n")
+        f.write(f"text_adapter: {text_adapter}\n")
         f.write(f"num_classes: {num_classes}\n")
         f.write(f"numeric_input_dim: {numeric_input_dim}\n")
         f.write(f"text_max_length: {TEXT_MAX_LENGTH}\n")
@@ -837,6 +867,8 @@ def train_model(model_path=None,
         'llm_use_lora': llm_use_lora,
         'lora_r': lora_r,
         'lora_alpha': lora_alpha,
+        'llm_pooling': llm_pooling,
+        'text_adapter': text_adapter,
         'num_classes': num_classes,
         'numeric_input_dim': numeric_input_dim,
         'learning_rate': learning_rate,
@@ -890,6 +922,8 @@ if __name__ == "__main__":
     parser.add_argument("--use_llm", action='store_true', default=None, help="使用LLM")
     parser.add_argument("--fusion_type", type=str, default="concat", help="融合策略 concat/add/attention")
     parser.add_argument("--bert_trainable", action='store_true', default=False, help="BERT可训练")
+    parser.add_argument("--llm_pooling", type=str, choices=["mean", "last"], default=None, help="LLM 文本池化方式（默认随变体，未指定变体时 mean）")
+    parser.add_argument("--text_adapter", action='store_true', default=None, help="在文本分支后接 adapter（A3_adapter 变体默认开启）")
     parser.add_argument("--seed", type=int, default=42, help="随机种子")
     parser.add_argument("--num_classes", type=int, default=None, help="分类类别数（默认自动检测）")
     parser.add_argument("--disable_class_weights", action='store_true', help="禁用类别加权损失")
@@ -944,5 +978,7 @@ if __name__ == "__main__":
         use_augmentation=args.use_augmentation,
         aug_noise_std=args.aug_noise_std,
         aug_prob=args.aug_prob,
+        llm_pooling=args.llm_pooling,
+        text_adapter=args.text_adapter,
         openset=args.openset
     )

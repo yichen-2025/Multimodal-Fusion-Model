@@ -31,7 +31,14 @@ VARIANTS = {
     "A0*_add": [12, 19, 20],
     "A0*_attn": [13, 21, 22],
     "A3": [39, 42, 45],
+    # 公平编码器对照（plan/2026-11-03）：每个变体取 head seed 42 的 3 个 backbone
+    "A0*_last": [50, 51, 52],
+    "A0_frozen": [59, 60, 61],
+    "A3_adapter": [68, 69, 70],
 }
+
+# 改动前就存在的变体：缺报告属硬错误；新变体未训练时可跳过（否则整个脚本无法运行）
+REQUIRED_VARIANTS = {"A0*_no_num", "A0*", "A0*_add", "A0*_attn", "A3"}
 
 
 def newest_report(ood_id):
@@ -123,7 +130,11 @@ def main():
             runs[v].append({"ood_id": oid, "report": name, "score": score,
                             "thr": head_threshold(oid)})
     if missing:
-        raise SystemExit("缺报告: %s" % (missing,))
+        hard = [m for m in missing if m[0] in REQUIRED_VARIANTS]
+        if hard:
+            raise SystemExit("缺报告: %s" % (hard,))
+        print("[警告] 以下新变体尚未训练，本轮跳过: %s" % (missing,), file=sys.stderr)
+    runs = {v: rs for v, rs in runs.items() if rs}
 
     # 1) 复算校验：全样本上必须与报告数值一致
     print("=" * 100)
@@ -230,8 +241,13 @@ def main():
                 r0["p_sample_plus_seed_two_sided"]))
         return res
 
-    diff_res = {other: diff_between("A0*", other) for other in ("A0*_no_num", "A0*_add", "A0*_attn")}
-    diff_a3 = {other: diff_between("A3", other) for other in ("A0*", "A0*_no_num")}
+    pair_vs_concat = [v for v in ("A0*_no_num", "A0*_add", "A0*_attn", "A0*_last", "A0_frozen")
+                      if v in runs and "A0*" in runs]
+    pair_vs_a3 = [v for v in ("A0*", "A0*_no_num", "A3_adapter") if v in runs and "A3" in runs]
+    diff_res = {other: diff_between("A0*", other) for other in pair_vs_concat}
+    diff_a3 = {other: diff_between("A3", other) for other in pair_vs_a3}
+    diff_last_vs_adapter = ({"A3_adapter": diff_between("A0*_last", "A3_adapter")}
+                            if "A0*_last" in runs and "A3_adapter" in runs else {})
 
     summary = {
         "n_boot": args.n_boot,
@@ -241,6 +257,7 @@ def main():
         "single_run_ci": {"%s|%d" % k: v for k, v in sample_ci.items()},
         "diff_vs_concat": diff_res,
         "diff_A3": diff_a3,
+        "diff_A0*_last_vs": diff_last_vs_adapter,
         "recompute_mismatch": bad,
     }
     if args.out:

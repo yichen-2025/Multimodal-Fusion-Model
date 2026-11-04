@@ -426,6 +426,95 @@ class TestEncoders:
         assert embeddings.shape == (5, 768), f"BERT编码器输出形状不正确，期望(5, 768)，实际{embeddings.shape}"
 
 
+class TestFairEncoderVariants:
+    """公平编码器对照（plan/2026-11-03 W1）：last pooling 与文本 adapter"""
+
+    def _build_model(self, **kwargs):
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from src.model_architectures.multi_modal_model import MultiModalFusionModel
+
+        params = dict(
+            use_numeric=True,
+            use_bert=True,
+            use_llm=False,
+            numeric_input_dim=79,
+            num_classes=10,
+            bert_trainable=False,
+        )
+        params.update(kwargs)
+        return MultiModalFusionModel(**params)
+
+    def test_pool_llm_hidden_last_uses_last_valid_token(self):
+        """last pooling 必须取最后一个非 pad token，而不是序列末位"""
+        model = self._build_model(llm_pooling="last", text_adapter=False).eval()
+
+        hidden = torch.arange(4 * 6 * 3, dtype=torch.float32).reshape(4, 6, 3)
+        mask = torch.ones(4, 6, dtype=torch.long)
+        mask[0, 4:] = 0  # 样本 0 只有前 4 个有效 token
+
+        out = model._pool_llm_hidden(hidden, mask)
+
+        assert out.shape == (4, 3)
+        assert torch.allclose(out[0], hidden[0, 3])
+        assert torch.allclose(out[1], hidden[1, 5])
+
+    def test_pool_llm_hidden_mean_ignores_pad(self):
+        """mean pooling 只对有效 token 求均值"""
+        model = self._build_model(llm_pooling="mean", text_adapter=False).eval()
+
+        hidden = torch.randn(2, 5, 3)
+        mask = torch.ones(2, 5, dtype=torch.long)
+        mask[1, 3:] = 0
+
+        out = model._pool_llm_hidden(hidden, mask)
+
+        assert torch.allclose(out[0], hidden[0].mean(dim=0), atol=1e-6)
+        assert torch.allclose(out[1], hidden[1, :3].mean(dim=0), atol=1e-6)
+
+    def test_text_adapter_forward_shape(self):
+        """A3_adapter 前向形状：文本 768 维经 adapter 后仍是 768 维"""
+        model = self._build_model(text_adapter=True).eval()
+        assert model.text_adapter is not None
+
+        stat = torch.randn(4, 79)
+        bert = torch.randn(4, 768)
+        with torch.no_grad():
+            out = model(stat, bert, return_features=True)
+
+        assert out["logits"].shape == (4, 10)
+        assert out["projected_features"].shape == (4, model.get_feature_dim())
+
+    def test_text_adapter_save_load_roundtrip(self, tmp_path):
+        """adapter 权重必须随 checkpoint 存取，加载后 logits 与保存前一致"""
+        model = self._build_model(text_adapter=True).eval()
+
+        stat = torch.randn(4, 79)
+        bert = torch.randn(4, 768)
+        with torch.no_grad():
+            before = model(stat, bert, return_features=True)
+
+        save_dir = str(tmp_path / "model_adapter")
+        model.save_pretrained(save_dir)
+
+        reloaded = type(model).from_pretrained(save_dir).eval()
+        assert reloaded.text_adapter is not None
+        with torch.no_grad():
+            after = reloaded(stat, bert, return_features=True)
+
+        assert torch.allclose(before["logits"], after["logits"], atol=1e-5)
+        assert torch.allclose(before["projected_features"], after["projected_features"], atol=1e-5)
+
+    def test_variant_registry_has_fair_encoder_entries(self):
+        """train.py 必须注册两个新变体，且配置与计划一致"""
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from scripts.train import VARIANT_CONFIGS
+
+        assert VARIANT_CONFIGS["A0*_last"]["llm_pooling"] == "last"
+        assert VARIANT_CONFIGS["A0*_last"]["use_llm"] is True
+        assert VARIANT_CONFIGS["A3_adapter"]["text_adapter"] is True
+        assert VARIANT_CONFIGS["A3_adapter"]["use_llm"] is False
+
+
 class TestModelTraining:
     """测试模型训练功能"""
     

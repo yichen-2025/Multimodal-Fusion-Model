@@ -59,9 +59,38 @@ POINTS = [
     ("A3", 3003, 456, 42, 45),
     ("A3", 3003, 456, 43, 46),
     ("A3", 3003, 456, 44, 47),
+    # ── 公平编码器对照（plan/2026-11-03）：A0*_last / A0_frozen / A3_adapter ──
+    ("A0*_last", 4001, 42, 42, 50),
+    ("A0*_last", 4001, 42, 43, 51),
+    ("A0*_last", 4001, 42, 44, 52),
+    ("A0*_last", 4002, 123, 42, 53),
+    ("A0*_last", 4002, 123, 43, 54),
+    ("A0*_last", 4002, 123, 44, 55),
+    ("A0*_last", 4003, 456, 42, 56),
+    ("A0*_last", 4003, 456, 43, 57),
+    ("A0*_last", 4003, 456, 44, 58),
+    ("A0_frozen", 4011, 42, 42, 59),
+    ("A0_frozen", 4011, 42, 43, 60),
+    ("A0_frozen", 4011, 42, 44, 61),
+    ("A0_frozen", 4012, 123, 42, 62),
+    ("A0_frozen", 4012, 123, 43, 63),
+    ("A0_frozen", 4012, 123, 44, 64),
+    ("A0_frozen", 4013, 456, 42, 65),
+    ("A0_frozen", 4013, 456, 43, 66),
+    ("A0_frozen", 4013, 456, 44, 67),
+    ("A3_adapter", 4021, 42, 42, 68),
+    ("A3_adapter", 4021, 42, 43, 69),
+    ("A3_adapter", 4021, 42, 44, 70),
+    ("A3_adapter", 4022, 123, 42, 71),
+    ("A3_adapter", 4022, 123, 43, 72),
+    ("A3_adapter", 4022, 123, 44, 73),
+    ("A3_adapter", 4023, 456, 42, 74),
+    ("A3_adapter", 4023, 456, 43, 75),
+    ("A3_adapter", 4023, 456, 44, 76),
 ]
 
-VARIANTS = ["A3", "A0*_no_num", "A0*", "A0*_add", "A0*_attn"]
+VARIANTS = ["A3", "A0*_no_num", "A0*", "A0*_add", "A0*_attn",
+            "A0*_last", "A0_frozen", "A3_adapter"]
 METRICS = ["auroc_genuine", "tpr_at_fpr_1", "unknown_recall_simulated",
            "known_accuracy", "unknown_recall_genuine"]
 
@@ -119,6 +148,9 @@ def main():
     out_variants = []
     for v in VARIANTS:
         vs = [r for r in rows if r["variant"] == v]
+        if not vs:
+            # 新变体尚未训练：不参与汇总，也不出现在 compare_* 里（避免 NaN）
+            continue
         base = [r for r in vs if r["head_seed"] == 42]
         stats = {}
         for k in METRICS:
@@ -172,8 +204,10 @@ def main():
         "metrics": METRICS,
         "points": rows,
         "variants": out_variants,
-        "compare_A0*_vs": {v: compare("A0*", v) for v in ("A3", "A0*_no_num", "A0*_add", "A0*_attn")},
-        "compare_A3_vs": {v: compare("A3", v) for v in ("A0*", "A0*_no_num")},
+        "compare_A0*_vs": {v: compare("A0*", v) for v in ("A3", "A0*_no_num", "A0*_add", "A0*_attn",
+                                                          "A0*_last", "A0_frozen")},
+        "compare_A3_vs": {v: compare("A3", v) for v in ("A0*", "A0*_no_num", "A3_adapter")},
+        "compare_A0*_last_vs": {v: compare("A0*_last", v) for v in ("A3_adapter",)},
     }
 
     print("=" * 104)

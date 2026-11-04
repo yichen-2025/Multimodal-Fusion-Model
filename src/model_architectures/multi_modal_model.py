@@ -108,7 +108,9 @@ class MultiModalFusionModel(nn.Module):
                  lora_r=8,
                  lora_alpha=16,
                  lora_dropout=0.05,
-                 lora_target_modules=None):
+                 lora_target_modules=None,
+                 llm_pooling="mean",
+                 text_adapter=False):
         """
         初始化多模态融合模型
         
@@ -138,6 +140,8 @@ class MultiModalFusionModel(nn.Module):
             lora_alpha (int): LoRA 缩放系数
             lora_dropout (float): LoRA dropout
             lora_target_modules (list): LoRA 目标模块，默认 ["q_proj", "v_proj"]
+            llm_pooling (str): LLM 文本向量池化方式 "mean"（有效 token 均值）或 "last"（最后一个非 pad token）
+            text_adapter (bool): 是否在文本分支后接 adapter（两层线性 + LayerNorm + GELU，仅 A3_adapter 启用）
         """
         super().__init__()
 
@@ -163,6 +167,15 @@ class MultiModalFusionModel(nn.Module):
         self.lora_alpha = lora_alpha
         self.lora_dropout = lora_dropout
         self.lora_target_modules = lora_target_modules or ["q_proj", "v_proj"]
+
+        # 文本池化方式（只影响 LLM 分支）
+        if llm_pooling not in ("mean", "last"):
+            raise ValueError(f"llm_pooling 只支持 'mean' / 'last'，收到: {llm_pooling}")
+        self.llm_pooling = llm_pooling
+
+        # 文本 adapter 开关；模块在 text_dim 确定后构建（见下方 text_dim 赋值处）
+        self._text_adapter_enabled = bool(text_adapter)
+        self.text_adapter = None
 
         # 标记：LLM 是否被 peft 包装过
         self._llm_is_peft = False
@@ -261,6 +274,15 @@ class MultiModalFusionModel(nn.Module):
         # 保存文本维度供后续使用
         self.text_dim = text_dim
 
+        # 文本 adapter：接在文本分支之后、融合投影之前，输入输出维度都是 text_dim
+        if self._text_adapter_enabled and text_dim > 0:
+            self.text_adapter = nn.Sequential(
+                nn.Linear(text_dim, text_dim),
+                nn.LayerNorm(text_dim),
+                nn.GELU(),
+                nn.Linear(text_dim, text_dim),
+            ).to(self.device)
+
         # 初始化特征融合投影模块
         self.fusion_projection = FeatureFusionProjection(
             numeric_dim=numeric_dim,
@@ -325,10 +347,43 @@ class MultiModalFusionModel(nn.Module):
             self.temperature.data = self.temperature.data.to(dtype=dtype)
         if self.bert_encoder is not None:
             self.bert_encoder.to(dtype=dtype)
+        if self.text_adapter is not None:
+            self.text_adapter.to(dtype=dtype)
         if self.class_prototypes is not None:
             self.class_prototypes.data = self.class_prototypes.data.to(dtype=dtype)
         if self.prototype_projection is not None:
             self.prototype_projection.to(dtype=dtype)
+
+    def train(self, mode=True):
+        """
+        覆写 train()：冻结的 LLM 底座（llm_use_lora=False）始终保持 eval 模式，
+        避免 A0_frozen 等"全冻结"对照混入 dropout 噪声。
+        """
+        super().train(mode)
+        if self.use_llm and self.llm is not None and not self.llm_use_lora:
+            self.llm.eval()
+        return self
+
+    def _pool_llm_hidden(self, last_hidden, attention_mask):
+        """
+        把 LLM 最后一层 hidden states 池化成句向量
+
+        Args:
+            last_hidden (torch.Tensor): [batch, seq_len, hidden]
+            attention_mask (torch.Tensor): [batch, seq_len]，1 表示有效 token
+
+        Returns:
+            torch.Tensor: [batch, hidden]
+        """
+        if self.llm_pooling == "last":
+            # 取每个样本最后一个非 pad token（右填充时即有效长度 - 1）
+            lengths = attention_mask.sum(dim=1).clamp(min=1) - 1
+            idx = torch.arange(last_hidden.size(0), device=last_hidden.device)
+            return last_hidden[idx, lengths]
+        # mean pooling：只对有效 token 求均值
+        mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden.size()).to(dtype=last_hidden.dtype)
+        denom = mask_expanded.sum(dim=1)
+        return (last_hidden * mask_expanded).sum(dim=1) / (denom + torch.finfo(last_hidden.dtype).eps)
 
     def forward(self, stat_tensor, bert_tensor, input_ids=None, attention_mask=None, labels=None,
                 return_features=False):
@@ -373,14 +428,9 @@ class MultiModalFusionModel(nn.Module):
                     output_hidden_states=True,
                 )
 
-                # mean pooling：对有效 token 的最后一层 hidden states 做平均
                 # CausalLM 没有 last_hidden_state，需要从 hidden_states tuple 取最后一层
                 last_hidden = outputs.hidden_states[-1]  # [batch, seq_len, hidden]
-                # 注意：用 last_hidden.dtype 替代 .float()，避免在 bf16/bf16 训练时 dtype 冲突
-                mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden.size()).to(dtype=last_hidden.dtype)
-                masked_embeddings = last_hidden * mask_expanded
-                denom = mask_expanded.sum(dim=1)
-                text_tensor = masked_embeddings.sum(dim=1) / (denom + torch.finfo(last_hidden.dtype).eps)
+                text_tensor = self._pool_llm_hidden(last_hidden, attention_mask)
                 # text_tensor: [batch, hidden_size]
             else:
                 # 没有 input_ids，用零向量占位
@@ -393,6 +443,10 @@ class MultiModalFusionModel(nn.Module):
         else:
             # 无文本模态
             text_tensor = torch.zeros(batch_size, self.text_dim, dtype=target_dtype, device=self.device)
+
+        # 文本 adapter（仅 A3_adapter 启用）：只作用在文本向量上，再进融合投影
+        if self.text_adapter is not None:
+            text_tensor = self.text_adapter(text_tensor.to(dtype=target_dtype))
 
         # ── Step 3: 外层融合 ──
         # 融合位置从 LLM 内部移到 LLM 外部！
@@ -554,13 +608,14 @@ class MultiModalFusionModel(nn.Module):
             )
             # CausalLM: 从 hidden_states tuple 取最后一层
             last_hidden = outputs.hidden_states[-1]
-            mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden.size()).to(dtype=last_hidden.dtype)
-            denom = mask_expanded.sum(dim=1)
-            text_tensor = (last_hidden * mask_expanded).sum(dim=1) / (denom + torch.finfo(last_hidden.dtype).eps)
+            text_tensor = self._pool_llm_hidden(last_hidden, attention_mask)
         elif self.use_bert and bert_tensor is not None:
             text_tensor = bert_tensor.to(dtype=target_dtype).to(self.device)
         else:
             text_tensor = torch.zeros(batch_size, self.text_dim, dtype=target_dtype, device=self.device)
+
+        if self.text_adapter is not None:
+            text_tensor = self.text_adapter(text_tensor.to(dtype=target_dtype))
 
         projected_features = self.fusion_projection(numeric_features, text_tensor)
         return projected_features
@@ -651,6 +706,9 @@ class MultiModalFusionModel(nn.Module):
             # 文本维度信息
             'text_dim': self.text_dim,
             '_llm_is_peft': self._llm_is_peft,
+            # 文本池化与 adapter（公平编码器对照所需）
+            'llm_pooling': self.llm_pooling,
+            'text_adapter': self.text_adapter is not None,
         }
         
         if self.class_weights is not None:
@@ -677,6 +735,9 @@ class MultiModalFusionModel(nn.Module):
             'classifier': self.classifier.state_dict(),
             'config': config
         }
+
+        if self.text_adapter is not None:
+            trainable_state['text_adapter'] = self.text_adapter.state_dict()
         
         if self.temperature is not None:
             trainable_state['temperature'] = self.temperature.data.cpu()
@@ -786,6 +847,8 @@ class MultiModalFusionModel(nn.Module):
             lora_alpha=lora_alpha,
             lora_dropout=lora_dropout,
             lora_target_modules=lora_target_modules,
+            llm_pooling=config.get('llm_pooling', 'mean'),
+            text_adapter=config.get('text_adapter', False),
         )
 
         # 加载保存的 LoRA adapter（如果存在）
@@ -817,6 +880,8 @@ class MultiModalFusionModel(nn.Module):
                 model.temperature.data = model.temperature.data.to(dtype=llm_dtype)
             if model.bert_encoder is not None:
                 model.bert_encoder.to(dtype=llm_dtype)
+            if model.text_adapter is not None:
+                model.text_adapter.to(dtype=llm_dtype)
             if model.class_prototypes is not None:
                 model.class_prototypes.data = model.class_prototypes.data.to(dtype=llm_dtype)
             if model.prototype_projection is not None:
@@ -826,6 +891,11 @@ class MultiModalFusionModel(nn.Module):
         model.numeric_encoder.load_state_dict(state_dict['numeric_encoder'])
         model.fusion_projection.load_state_dict(state_dict['fusion_projection'])
         model.classifier.load_state_dict(state_dict['classifier'])
+
+        if 'text_adapter' in state_dict:
+            if model.text_adapter is None:
+                raise RuntimeError("checkpoint 含 text_adapter 权重，但模型未启用 text_adapter")
+            model.text_adapter.load_state_dict(state_dict['text_adapter'])
         
         if 'temperature' in state_dict and model.temperature is not None:
             model.temperature.data.copy_(state_dict['temperature'])
@@ -847,6 +917,8 @@ class MultiModalFusionModel(nn.Module):
                 model.temperature.data = model.temperature.data.to(dtype=llm_dtype)
             if model.bert_encoder is not None:
                 model.bert_encoder.to(dtype=llm_dtype)
+            if model.text_adapter is not None:
+                model.text_adapter.to(dtype=llm_dtype)
             if model.class_prototypes is not None:
                 model.class_prototypes.data = model.class_prototypes.data.to(dtype=llm_dtype)
             if model.prototype_projection is not None:
