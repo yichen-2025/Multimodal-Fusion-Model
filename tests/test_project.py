@@ -87,7 +87,7 @@ def extracted_subset(cleaned_data):
     from scripts.extract_subset import extract_subset
     
     success, dataset_id = extract_subset(
-        num_samples=1000,
+        total_samples=1000,
         dataset_id=TEST_DATASET_ID,
         random_state=42
     )
