@@ -29,20 +29,31 @@ def test_clean_data():
     
     data = {
         "Destination Port": np.random.randint(1, 65535, n_samples),
-        "Bwd Packet Length Mean": np.random.randn(n_samples) * 100 + 500,
-        "Avg Bwd Segment Size": np.random.randn(n_samples) * 50 + 200,
-        "Bwd Packet Length Max": np.random.randint(100, 2000, n_samples),
-        "Bwd Packet Length Std": np.random.randn(n_samples) * 50 + 30,
-        "URG Flag Count": np.random.randint(0, 5, n_samples),
-        "Packet Length Mean": np.random.randn(n_samples) * 100 + 400,
+        "Protocol": np.random.choice([1, 6, 17], n_samples),
+        "Flow Duration": np.random.randint(100, 1000000, n_samples),
+        "Total Fwd Packets": np.random.randint(1, 100, n_samples),
+        "Total Backward Packets": np.random.randint(1, 100, n_samples),
+        "Total Length of Fwd Packets": np.random.randn(n_samples) * 100 + 500,
+        "Total Length of Bwd Packets": np.random.randn(n_samples) * 100 + 500,
+        "Flow Bytes/s": np.random.randn(n_samples) * 1000 + 5000,
+        "Flow Packets/s": np.random.randn(n_samples) * 100 + 500,
+        "Flow IAT Mean": np.random.randn(n_samples) * 100 + 500,
+        "Flow IAT Std": np.random.randn(n_samples) * 50 + 30,
+        "Flow IAT Max": np.random.randint(100, 2000, n_samples),
+        "Fwd IAT Mean": np.random.randn(n_samples) * 100 + 500,
+        "Bwd IAT Mean": np.random.randn(n_samples) * 100 + 500,
         "Average Packet Size": np.random.randn(n_samples) * 80 + 350,
-        "Packet Length Std": np.random.randn(n_samples) * 60 + 40,
+        "Down/Up Ratio": np.random.randint(0, 10, n_samples),
+        "SYN Flag Count": np.random.randint(0, 5, n_samples),
+        "ACK Flag Count": np.random.randint(0, 5, n_samples),
+        "PSH Flag Count": np.random.randint(0, 5, n_samples),
+        "URG Flag Count": np.random.randint(0, 5, n_samples),
         "Label": np.random.choice(['BENIGN', 'DDoS'], n_samples, p=[0.5, 0.5]),
     }
-    
-    for i in range(n_features - 10):
+
+    for i in range(n_features - 20):
         data[f"Feature_{i}"] = np.random.randn(n_samples)
-    
+
     df = pd.DataFrame(data)
     df.to_csv(os.path.join(test_dir, "test_data.csv"), index=False)
     
@@ -88,6 +99,7 @@ def extracted_subset(cleaned_data):
     
     success, dataset_id = extract_subset(
         total_samples=1000,
+        mode="balanced",
         dataset_id=TEST_DATASET_ID,
         random_state=42
     )
@@ -290,13 +302,11 @@ class TestExtractSubset:
         assert 'log_id' in log_data, "日志缺少log_id字段"
         assert 'timestamp' in log_data, "日志缺少timestamp字段"
         assert 'dataset_id' in log_data, "日志缺少dataset_id字段"
+        assert log_data['numeric_dim'] == 79, f"numeric_dim 期望 79，实际 {log_data['numeric_dim']}"
+        assert log_data['mode'] == 'balanced'
         assert 'total_samples' in log_data, "日志缺少total_samples字段"
-        assert 'positive_samples' in log_data, "日志缺少positive_samples字段"
-        assert 'negative_samples' in log_data, "日志缺少negative_samples字段"
         
         assert log_data['total_samples'] == 1000, f"日志中样本数不正确，期望1000，实际{log_data['total_samples']}"
-        assert log_data['positive_samples'] == 500, f"日志中正样本数不正确，期望500，实际{log_data['positive_samples']}"
-        assert log_data['negative_samples'] == 500, f"日志中负样本数不正确，期望500，实际{log_data['negative_samples']}"
 
 
 class TestSplitModality:
@@ -328,8 +338,8 @@ class TestSplitModality:
         scaler_data = np.load(scaler_path, allow_pickle=True).item()
         assert 'mean' in scaler_data, "scaler缺少mean参数"
         assert 'std' in scaler_data, "scaler缺少std参数"
-        assert len(scaler_data['mean']) == 9, f"mean维度不正确，期望9，实际{len(scaler_data['mean'])}"
-        assert len(scaler_data['std']) == 9, f"std维度不正确，期望9，实际{len(scaler_data['std'])}"
+        assert len(scaler_data['mean']) == 79, f"mean维度不正确，期望9，实际{len(scaler_data['mean'])}"
+        assert len(scaler_data['std']) == 79, f"std维度不正确，期望9，实际{len(scaler_data['std'])}"
     
     def test_train_test_ratio(self, split_data):
         split_dir, _, _ = split_data
@@ -397,7 +407,7 @@ class TestEncoders:
         
         from src.model_architectures.numeric_encoder import NumericEncoder
         
-        encoder = NumericEncoder(input_dim=9)
+        encoder = NumericEncoder(input_dim=79)
         
         split_dir, _, _ = split_data
         train_data = np.load(os.path.join(split_dir, "train.npz"), allow_pickle=True)
