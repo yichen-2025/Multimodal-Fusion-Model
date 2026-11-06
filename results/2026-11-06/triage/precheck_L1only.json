@@ -1,0 +1,40 @@
+{
+ "stage": "L1-only_precheck",
+ "kappa": "未测（缺 L2）",
+ "verdict": "不作判定",
+ "n_pack": 40,
+ "arms": {
+  "A0_template": {
+   "n": 20,
+   "actionability_mean": 3.0,
+   "actionability_sd": 0.0,
+   "sufficiency_mean": 3.0,
+   "sufficiency_sd": 0.0
+  },
+  "A3_llm_rag": {
+   "n": 20,
+   "actionability_mean": 3.05,
+   "actionability_sd": 1.146,
+   "sufficiency_mean": 4.3,
+   "sufficiency_sd": 0.657
+  }
+ },
+ "contrasts": {
+  "A3_minus_A0_actionability": {
+   "n": 20,
+   "mean_diff": 0.05,
+   "p": 0.8257,
+   "win": 9,
+   "tie": 1,
+   "lose": 10
+  },
+  "A3_minus_A0_sufficiency": {
+   "n": 20,
+   "mean_diff": 1.3,
+   "p": 0.0001,
+   "win": 18,
+   "tie": 2,
+   "lose": 0
+  }
+ }
+}

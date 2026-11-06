@@ -240,7 +240,7 @@ def mode_pack(args):
     key, pack = {}, []
     for i, (sid, rs) in enumerate(sorted(by_sid.items())):
         for j, r in enumerate(rs):
-            pid = "p%03d" % (i * len(rs) + j + 1)
+            pid = "p%03d" % (len(pack) + 1)  # 逐行递增，避免各样本臂数不等时 pid 撞车
             key[pid] = {"sample_id": sid, "arm": r["arm"]}
             pack.append({"pack_id": pid, "sample_id": sid,
                          "S1": r["S1"], "S2": " / ".join(r["S2"]),
