@@ -1,0 +1,21 @@
+﻿sample_id,source,family,five_slots,labeler,actionability,sufficiency,notes
+ds200_s0_1833,genuine,heldout_web_or_other,,,,,真实留出类（Web Attack / Other Attack，逐样本不可分）；unknown_origin=1；ood_score=4.94890022277832；报告=ood_routing_20261105_205104.json
+ds200_s0_1894,genuine,heldout_web_or_other,,,,,真实留出类（Web Attack / Other Attack，逐样本不可分）；unknown_origin=1；ood_score=0.5984002351760864；报告=ood_routing_20261105_205104.json
+ds200_s0_1912,genuine,heldout_web_or_other,,,,,真实留出类（Web Attack / Other Attack，逐样本不可分）；unknown_origin=1；ood_score=0.7815974950790405；报告=ood_routing_20261105_205104.json
+ds200_s0_1924,genuine,heldout_web_or_other,,,,,真实留出类（Web Attack / Other Attack，逐样本不可分）；unknown_origin=1；ood_score=0.6840044260025024；报告=ood_routing_20261105_205104.json
+ds200_s0_1962,genuine,heldout_web_or_other,,,,,真实留出类（Web Attack / Other Attack，逐样本不可分）；unknown_origin=1；ood_score=0.6176239252090454；报告=ood_routing_20261105_205104.json
+ds200_s0_1975,genuine,heldout_web_or_other,,,,,真实留出类（Web Attack / Other Attack，逐样本不可分）；unknown_origin=1；ood_score=0.6179922819137573；报告=ood_routing_20261105_205104.json
+ds200_s0_1992,genuine,heldout_web_or_other,,,,,真实留出类（Web Attack / Other Attack，逐样本不可分）；unknown_origin=1；ood_score=1.4022868871688843；报告=ood_routing_20261105_205104.json
+ds200_s0_2029,genuine,heldout_web_or_other,,,,,真实留出类（Web Attack / Other Attack，逐样本不可分）；unknown_origin=1；ood_score=5.22170352935791；报告=ood_routing_20261105_205104.json
+ds200_s0_2037,genuine,heldout_web_or_other,,,,,真实留出类（Web Attack / Other Attack，逐样本不可分）；unknown_origin=1；ood_score=0.6034320592880249；报告=ood_routing_20261105_205104.json
+ds200_s0_2038,genuine,heldout_web_or_other,,,,,真实留出类（Web Attack / Other Attack，逐样本不可分）；unknown_origin=1；ood_score=5.261320114135742；报告=ood_routing_20261105_205104.json
+ds200_s0_1687,simulated,known_relabeled,,,,,分布内已知类改标 unknown（原类不可逐样本恢复，特征仍属已知类）；unknown_origin=2；ood_score=0.9181880950927734；报告=ood_routing_20261105_205104.json
+ds200_s0_1706,simulated,known_relabeled,,,,,分布内已知类改标 unknown（原类不可逐样本恢复，特征仍属已知类）；unknown_origin=2；ood_score=1.0508817434310913；报告=ood_routing_20261105_205104.json
+ds200_s0_1716,simulated,known_relabeled,,,,,分布内已知类改标 unknown（原类不可逐样本恢复，特征仍属已知类）；unknown_origin=2；ood_score=3.1209218502044678；报告=ood_routing_20261105_205104.json
+ds200_s0_1720,simulated,known_relabeled,,,,,分布内已知类改标 unknown（原类不可逐样本恢复，特征仍属已知类）；unknown_origin=2；ood_score=4.204124450683594；报告=ood_routing_20261105_205104.json
+ds200_s0_1723,simulated,known_relabeled,,,,,分布内已知类改标 unknown（原类不可逐样本恢复，特征仍属已知类）；unknown_origin=2；ood_score=0.9295618534088135；报告=ood_routing_20261105_205104.json
+ds200_s0_1724,simulated,known_relabeled,,,,,分布内已知类改标 unknown（原类不可逐样本恢复，特征仍属已知类）；unknown_origin=2；ood_score=3.0040764808654785；报告=ood_routing_20261105_205104.json
+ds200_s0_1732,simulated,known_relabeled,,,,,分布内已知类改标 unknown（原类不可逐样本恢复，特征仍属已知类）；unknown_origin=2；ood_score=3.3735780715942383；报告=ood_routing_20261105_205104.json
+ds200_s0_1753,simulated,known_relabeled,,,,,分布内已知类改标 unknown（原类不可逐样本恢复，特征仍属已知类）；unknown_origin=2；ood_score=0.8237028121948242；报告=ood_routing_20261105_205104.json
+ds200_s0_1778,simulated,known_relabeled,,,,,分布内已知类改标 unknown（原类不可逐样本恢复，特征仍属已知类）；unknown_origin=2；ood_score=3.473964214324951；报告=ood_routing_20261105_205104.json
+ds200_s0_1803,simulated,known_relabeled,,,,,分布内已知类改标 unknown（原类不可逐样本恢复，特征仍属已知类）；unknown_origin=2；ood_score=0.9395754337310791；报告=ood_routing_20261105_205104.json
