@@ -78,6 +78,26 @@ FORCED_MODEL_STATUS = {
            "model_2013"),
 }
 
+# ── 公平编码器对照（2026-11-03）
+# 这批 backbone 的闭集/OOD 指标写在路由报告里，没有独立 test_report；
+# 不人工覆盖为 active，其路由报告与 OOD 头会被连带降级并隔离。
+_FAIR_ENCODER_MODELS = {
+    4001: "A0*_last seed 42", 4002: "A0*_last seed 123", 4003: "A0*_last seed 456",
+    4011: "A0_frozen seed 42", 4012: "A0_frozen seed 123", 4013: "A0_frozen seed 456",
+    4021: "A3_adapter seed 42", 4022: "A3_adapter seed 123", 4023: "A3_adapter seed 456",
+    5001: "A3 seed 789", 5002: "A3 seed 1011",
+    5011: "A3_adapter seed 789", 5012: "A3_adapter seed 1011",
+    5021: "A0* seed 789", 5022: "A0* seed 1011",
+}
+for _mid, _tag in _FAIR_ENCODER_MODELS.items():
+    FORCED_MODEL_STATUS[_mid] = (
+        "active",
+        "公平编码器对照 backbone（%s）；指标见 results/2026-11-03/"
+        "ood_fair_encoder_table_n5.md，闭集/OOD 结果写在路由报告里，无独立 test_report"
+        % _tag,
+        "",
+    )
+
 # 人工状态覆盖（报告）：backbone 被覆盖为非 active 时，对应报告同步降级，避免台账自相矛盾。
 FORCED_REPORT_STATUS = {
     29: ("deprecated",
@@ -576,6 +596,12 @@ def apply_archive(planned):
     for row in planned:
         src = os.path.join(PROJECT_ROOT, row["path"])
         dst = os.path.join(ARCHIVE_DIR, row["path"])
+        if os.path.exists(dst):
+            # shutil.move 遇到已存在的 dst 会把 src 塞进 dst 内部（目录嵌套），
+            # 2026-11-06 已因此把新 OOD 头埋进旧头目录，这里改为 fail-fast。
+            raise RuntimeError(
+                "归档目标已存在，拒绝自动隔离：%s（源 %s）。"
+                "请先人工确认同名归档产物后再 --apply。" % (row["path"], row["id"]))
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         size, dig = dirsize(src), digest(src)
         shutil.move(src, dst)
