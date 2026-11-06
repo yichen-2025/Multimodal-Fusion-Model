@@ -39,6 +39,7 @@
 | C-08 | 低 FPR 与模拟未知召回是共同短板 | 已证实（描述性） | `tpr@fpr=1%` 0.027–0.084；`unknown_recall_simulated` 0.039–0.127（A0\*_attn 最高 0.1268）｜`docs/stage_conclusion_20261027.md` §3、`docs/stage_conclusion_20261103.md` §4 | 按红线不调 `distance_type` / `temperature` / 阈值来遮掩 |
 | C-09 | 混合 `unknown_recall`（真实未知 + 模拟未知）可当作真实 OOD 能力 | **未支持** | 台账中 144 份 OOD 报告因旧划分缺 `unknown_origin` 仍为 `deprecated`；活跃开集划分才可分解 genuine/simulated｜`artifacts/ledger.csv`（`kind=split`、`kind=ood_report`）、`artifacts/README.md` | 引用旧报告必须标注"deprecated，混合口径" |
 | C-10 | 同一 backbone 上换 head seed 会明显改变结论 | **未支持** | head 极差：`auroc_genuine` ≤0.00014（≤0.014pp），多数工作点指标极差为 0｜`docs/stage_conclusion_20261027.md` §3.1、`results/2026-10-28/ood_head_seed_summary.csv` | 例外：`A0*_add` 的 `unknown_recall_simulated` head 极差 0.00613，单头数值需带 seed 波动 |
+| C-25 | **G1 终局**：LLM 主干（`A0*` 系）相对最佳 no-LLM 变体在 `tpr@fpr=1%` 上无可检测增益 | **未支持** | `best_llm = A0*` 0.0878 ± 0.0079（n=5）vs `best_no_llm = A3` 0.0691 ± 0.0920（n=5）：`A0* − A3` = +1.87pp，配对 t-CI [−8.85, +12.59] 跨零、bootstrap（B=4000，sample+seed）p=0.549；未过“≥2pp 且 CI 不重叠”门槛，也未确认方向相反｜`results/2026-11-03/ood_multiseed_fair_encoder_n5.json`、`bootstrap_ood_ci_fair_encoder_n5.json`、`ood_fair_encoder_table_n5.md` §2 | 仅 `dataset_200 / split_openset_0`、单 Web Attack 家族。**本阶段不再新增检测变体**：`A3_ft`（BERT 联合微调）未参评——训练时的文本特征是离线预算的 `bert` 向量，`BertEncoder.forward` 带 `@torch.no_grad()`，`save_pretrained` 也不落 BERT 权重，加 `trainable` 开关只会得到一个与 `A3` 数值等价的假变体；`A0*_cti` 因 `dataset_200` 无文本列未做 |
 
 ## 3. ATT&CK 映射与检索
 
@@ -62,7 +63,7 @@
 | ID | 结论 | 状态 | 证据（数值｜产物） | 边界 |
 |---|---|---|---|---|
 | C-18 | 结论可推广到多未知家族 / 跨数据集 | **待检验** | 当前只留出 1 个 Web Attack 家族，未做 CIC-IDS2017→UNSW-NB15、时间切分、少样本 | — |
-| C-19 | 公平编码器对照（≥4 变体 × 3 seeds，控制 batch/epoch/pooling/适配）会改变现有判读 | 已证实（本数据/本实现） | 5 变体 backbone 级：`A0*` `tpr@fpr=1%` 0.0878 ± 0.0079（n=5）vs `A3` 0.0691 ± 0.0920（n=5），差 +1.87pp、CI 跨零；`A0*` vs `A3_adapter` +5.61pp [+3.02, +8.20]，但 AUROC −3.52pp [−6.71, −0.32]；G1 判定**不确定**（未过 ≥2pp 且 CI 不重叠）｜`results/2026-11-03/ood_multiseed_fair_encoder_n5.json`、`bootstrap_ood_ci_fair_encoder_n5.json`、`ood_fair_encoder_table_n5.md` | 仅单 Web Attack 家族；`A0*_last`/`A0_frozen` 仍 n=3；判定按 `best_llm − best_no_llm`，`best_no_llm = A3` |
+| C-19 | 公平编码器对照（≥4 变体 × 3 seeds，控制 batch/epoch/pooling/适配）会改变现有判读 | 已证实（本数据/本实现） | 5 变体 backbone 级：`A0*` `tpr@fpr=1%` 0.0878 ± 0.0079（n=5）vs `A3` 0.0691 ± 0.0920（n=5），差 +1.87pp、CI 跨零；`A0*` vs `A3_adapter` +5.61pp [+3.02, +8.20]，但 AUROC −3.52pp [−6.71, −0.32]；G1 判定**不确定**（未过 ≥2pp 且 CI 不重叠）｜`results/2026-11-03/ood_multiseed_fair_encoder_n5.json`、`bootstrap_ood_ci_fair_encoder_n5.json`、`ood_fair_encoder_table_n5.md` | 仅单 Web Attack 家族；`A0*_last`/`A0_frozen` 仍 n=3；判定按 `best_llm − best_no_llm`，`best_no_llm = A3`；G1 终局判定见 **C-25** |
 | C-20 | 语义原型在 `auroc_simulated` 或 `tpr@fpr=1%` 上带来 ≥2pp 提升 | **待检验** | 尚无原型实验产物 | — |
 | C-21 | 成本-精度 Pareto 能决定 LLM 该放哪一层 | **待检验** | 尚无延迟/显存/每千样本成本测量 | — |
 | C-22 | `llm_pooling` 由 mean 改 last 能改善 OOD | **未支持** | `A0*_last − A0*`：AUROC +0.04pp、`tpr@fpr=1%` −1.47pp、recsim +1.23pp，n=3 全跨零；二者统计不可区分｜`results/2026-11-03/ood_multiseed_fair_encoder_n5.json`、`bootstrap_ood_ci_fair_encoder_n5.json` | 只测 `last` 一处改动，未测 attention/加权 pooling |
@@ -95,6 +96,7 @@
 |---|---|---|
 | 2026-11-03 | v1.0 | 建表：21 条结论（已证实 7 / 未支持 9 / 待检验 5）按闭集、LLM 检测、映射检索、解释质量、泛化五组登记 |
 | 2026-11-05 | v1.1 | 公平编码器对照收口：C-19 由“待检验”升为“已证实（本数据/本实现）”，G1 判“不确定”；新增 C-22（last pooling 未支持）、C-23（A0_frozen trade-off 已证实）、C-24（text_adapter 未支持）；C-13 补两步式证据 |
+| 2026-11-06 | v1.2 | G1 **终局判定**固化为 C-25（`未支持`：+1.87pp、t-CI [−8.85, +12.59] 跨零，未过 ≥2pp 门槛）；C-19 边界加指向 C-25；明确本阶段不再新增检测变体，`A3_ft`（文本特征离线预算，加开关只会得到与 A3 等价的假变体）与 `A0*_cti`（无文本列）不参评 |
 
 > 新增结论必须先定状态再写数值；状态升级（未支持 → 已证实）需要新的预注册口径与产物，
 > 并在此表追加变更行。
