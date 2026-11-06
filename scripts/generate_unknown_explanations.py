@@ -55,28 +55,108 @@ SYSTEM_PROMPT = """你是一名网络安全分析专家，负责为「被判为�
 2. 解释中出现的任何数字都必须能在「流量文本特征」原文中找到并照抄原值，
    禁止改写量级、换算单位，也禁止自行计算派生数值（如求平均、求和、做差）；
 3. 禁止引用「检索证据」中出现的任何数字（端口号、速率、阈值等），只能定性引用其技术名称与行为描述；
-4. 该样本已被判定为未知类，但仍需从检索证据给出的候选编号中选出最相近的一项写入
-   mitre_technique_id，作为参考（不改变未知判定）；不得编造候选之外的编号，候选为空时填 null；
+4. 该样本已被判定为未知类。若检索证据足以支持某个候选，就把最相近的一项写入
+   mitre_technique_id；若证据不足、或候选之间无法区分，填 null，并在 explanation
+   中写明“证据不足/无法归属”的理由。禁止为填满字段而强行选择；不得编造候选之外的编号；
 5. 输出严格为 JSON 格式，包含两个字段：explanation（中文解释）和 mitre_technique_id（ATT&CK 编号或 null）"""
 
+STEP1_SYSTEM_PROMPT = """你是网络安全分析专家，只做「证据是否足够」的判断。
+给定流量文本特征和检索到的 ATT&CK 候选，判断这些证据是否足以支持把该未知样本归入其中某一个技术。
+严格输出 JSON：{"sufficient": true 或 false, "reason": "中文理由"}。
+- 判 sufficient=false 时，reason 必须以“证据不足：”开头，并说明缺少什么证据或候选为何无法区分；
+- 判 sufficient=true 时，reason 必须以“证据充足：”开头，并说明哪个候选与技术行为对应；
+- 不要输出 ATT&CK 编号，不要输出解释文本。"""
 
-def build_user_prompt(text_description, behavior_tokens, evidence):
-    """构建 unknown 路径的 user prompt（证据只作定性参考）。"""
-    lines = []
-    for e in evidence:
-        lines.append(f"  - {e['id']}: {e['name']}（行为：{e['detection']}）")
-    ev_str = "\n".join(lines) if lines else "  - （无检索证据）"
+
+def build_step1_prompt(text_description, behavior_tokens, evidence):
+    """第一步：只判断证据是否足以支持某个候选，不选择编号。"""
+    ev_str = _format_evidence(evidence)
     tok_str = "、".join(behavior_tokens) or "无"
     return f"""流量文本特征：
 {text_description}
 
+规则抽取的行为特征词元：{tok_str}
+
+检索到的相近 ATT&CK 技术（候选）：
+{ev_str}
+
+请判断这些证据是否足以支持归入其中某一个候选技术，并严格输出 JSON。"""
+
+
+def _format_evidence(evidence):
+    lines = []
+    for e in evidence:
+        lines.append(f"  - {e['id']}: {e['name']}（行为：{e['detection']}）")
+    return "\n".join(lines) if lines else "  - （无检索证据）"
+
+
+def build_user_prompt(text_description, behavior_tokens, evidence, assessment=None):
+    """第二步：基于证据评估生成解释与编号（证据只作定性参考）。"""
+    ev_str = _format_evidence(evidence)
+    tok_str = "、".join(behavior_tokens) or "无"
+    assess_str = ""
+    if assessment:
+        status = "证据充足" if assessment.get("sufficient") else "证据不足"
+        reason = assessment.get("reason") or "未给出理由"
+        assess_str = f"\n上一步证据评估：{status}。理由：{reason}\n"
+    return f"""流量文本特征：
+{text_description}
+
 判定结果：未知类（不属于任何已知类）
+{assess_str}
 规则抽取的行为特征词元：{tok_str}
 
 检索到的相近 ATT&CK 技术（证据，仅供定性参考，禁止引用其中的数字）：
 {ev_str}
 
 请生成 JSON 格式的分析结果："""
+
+
+def parse_sufficiency_response(resp):
+    """解析第一步的 sufficient/reason JSON，解析失败时按证据不足处理。"""
+    cleaned = (resp or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+    parsed = None
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start != -1 and end > start:
+            try:
+                parsed = json.loads(cleaned[start:end + 1])
+            except json.JSONDecodeError:
+                parsed = None
+    if not isinstance(parsed, dict):
+        return {"sufficient": False, "reason": cleaned[:300]}
+    val = parsed.get("sufficient")
+    sufficient = val.strip().lower() in ("true", "yes", "1", "是") if isinstance(val, str) else bool(val)
+    reason = str(parsed.get("reason") or "").strip()
+    if reason and not reason.startswith(("证据不足", "证据充足")):
+        reason = ("证据充足：" if sufficient else "证据不足：") + reason
+    return {"sufficient": sufficient, "reason": reason}
+
+
+def generate_response(llm_model, tokenizer, system_prompt, user_prompt, device, max_new_tokens):
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    try:
+        chat = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    except Exception:
+        chat = (f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
+                f"<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n")
+    inputs = tokenizer(chat, return_tensors="pt", truncation=True, max_length=1536).to(device)
+    with torch.no_grad():
+        out = llm_model.generate(
+            **inputs, max_new_tokens=max_new_tokens, do_sample=False,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+    return tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
 
 
 def load_split(dataset_id, split_id, openset=True):
@@ -152,6 +232,7 @@ def main():
     ap.add_argument("--output", type=str, default=None)
     ap.add_argument("--device", type=str, default="cuda")
     ap.add_argument("--max_new_tokens", type=int, default=400)
+    ap.add_argument("--step1_max_new_tokens", type=int, default=120)
     ap.add_argument("--dry_run", action="store_true", help="只抽样并打印构成，不加载模型")
     args = ap.parse_args()
 
@@ -214,25 +295,30 @@ def main():
         text = texts[g]
         evidence = ent["cti_rag_explanation"].get("top_k", [])
         behavior_tokens = extract_behavior_tokens(text)
-        user_prompt = build_user_prompt(text, behavior_tokens, evidence)
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ]
-        try:
-            chat = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        except Exception:
-            chat = (f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
-                    f"<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n")
-        inputs = tokenizer(chat, return_tensors="pt", truncation=True, max_length=1536).to(args.device)
-        with torch.no_grad():
-            out = llm_model.generate(
-                **inputs, max_new_tokens=args.max_new_tokens, do_sample=False,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-        resp = tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+        # 第一步：只判断证据是否足够，不选择编号
+        step1_resp = generate_response(
+            llm_model, tokenizer, STEP1_SYSTEM_PROMPT,
+            build_step1_prompt(text, behavior_tokens, evidence),
+            args.device, args.step1_max_new_tokens,
+        )
+        assessment = parse_sufficiency_response(step1_resp)
+
+        # 第二步：带着评估结果生成解释与编号
+        user_prompt = build_user_prompt(text, behavior_tokens, evidence, assessment)
+        resp = generate_response(
+            llm_model, tokenizer, SYSTEM_PROMPT, user_prompt,
+            args.device, args.max_new_tokens,
+        )
         parsed = parse_llm_response(resp, num_known_classes)
         explanation = parsed["explanation"]
+
+        # 两步式约束：评估为证据不足时强制 null，并把第一步的理由带入解释
+        if not assessment["sufficient"]:
+            parsed["mitre_technique_id"] = None
+            reason = assessment["reason"] or "证据不足：检索证据无法支持具体技术归属"
+            if not any(k in explanation for k in ("证据不足", "无法归属", "无法确定", "不确定")):
+                sep = "" if reason.endswith("。") else "。"
+                explanation = f"{reason}{sep}{explanation}"
 
         origin = int(origins[g])
         # 真值技术：simulated 用合并类（label=K）；known-FP 用 CSV 原始类；genuine 不计算
@@ -268,6 +354,8 @@ def main():
             "correct": int(labels[g]) == num_known_classes,
             "true_mitre_ids": truth,
             "predicted_mitre_id": parsed["mitre_technique_id"],
+            "step1_sufficient": assessment["sufficient"],
+            "step1_reason": assessment["reason"],
             "mapping_declared_null": ('"mitre_technique_id": "null"' in resp)
             or ('"mitre_technique_id": null' in resp),
             "explanation": explanation,
@@ -284,6 +372,11 @@ def main():
 
     n = len(results)
     referenced = sum(1 for r in results if r["n_verified"] > 0)
+    null_with_reason_n = sum(
+        1 for r in results
+        if r["predicted_mitre_id"] is None
+        and any(k in (r["explanation"] or "") for k in ("证据不足", "无法归属", "无法确定", "不确定"))
+    )
     unverified = sum(1 for r in results if r["n_unverified"] > 0)
     empty = sum(1 for r in results if not (r["explanation"] or "").strip())
 
@@ -323,6 +416,9 @@ def main():
     print(f"引用率（v3）= {referenced}/{n} = {referenced / n:.4f}"
           f"（关卡 ≥0.90：{'PASS' if referenced / n >= 0.90 else 'FAIL'}）")
     print(f"未验证数字率（v3）= {unverified}/{n} = {unverified / n:.4f}")
+    print(f"带理由弃权率 = {null_with_reason_n}/{n} = {null_with_reason_n / n:.4f}")
+    sufficient_n = sum(1 for r in results if r["step1_sufficient"])
+    print(f"第一步判定证据充足 = {sufficient_n}/{n} = {sufficient_n / n:.4f}")
     for k, v in by_origin.items():
         print(f"  - {k}: n={v['n']} 引用率={v['reference_rate']} 未验证={v['unverified_number_rate']}")
     for k, v in hit.items():
@@ -350,6 +446,7 @@ def main():
             "index_recovery": {"matched": len(pool), "unmatched": unmatched,
                                "method": "ood_score float32 精确匹配 + true_label 校验"},
             "llm_model_path": llm_model_path,
+            "prompt_mode": "two_step",
             "prompt_numeric_rule": "解释数字只能来自 text_description；检索证据禁止引用数字",
             "number_rule_version": "v3(unit_base+v2)",
             "timestamp": time.strftime("%Y%m%d_%H%M%S"),
@@ -360,6 +457,9 @@ def main():
             "gate_reference_rate_met": referenced / n >= 0.90,
             "empty_explanations": empty,
             "llm_declared_null_n": sum(1 for r in results if r["mapping_declared_null"]),
+            "null_with_reason_rate": round(null_with_reason_n / n, 4),
+            "step1_sufficient_n": sum(1 for r in results if r["step1_sufficient"]),
+            "prompt_mode": "two_step",
             "by_origin": by_origin,
             "mitre_hit": hit,
         },

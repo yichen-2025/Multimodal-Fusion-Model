@@ -27,14 +27,15 @@ NPZ = os.path.join(PROJECT_ROOT, "split_data", "dataset_200", "split_openset_0",
 
 VARIANTS = {
     "A0*_no_num": [10, 15, 16],
-    "A0*": [14, 17, 18],
+    "A0*": [14, 17, 18, 92, 95],
     "A0*_add": [12, 19, 20],
     "A0*_attn": [13, 21, 22],
-    "A3": [39, 42, 45],
-    # 公平编码器对照（plan/2026-11-03）：每个变体取 head seed 42 的 3 个 backbone
-    "A0*_last": [50, 51, 52],
-    "A0_frozen": [59, 60, 61],
-    "A3_adapter": [68, 69, 70],
+    "A3": [39, 42, 45, 80, 83],
+    # 公平编码器对照（plan/2026-11-03）：每变体取 head seed 42、3 个 backbone
+    # 2026-11-05 补 seed 后 A3/A3_adapter/A0* 扩到 5 个 backbone
+    "A0*_last": [50, 53, 56],
+    "A0_frozen": [59, 62, 65],
+    "A3_adapter": [68, 71, 74, 86, 89],
 }
 
 # 改动前就存在的变体：缺报告属硬错误；新变体未训练时可跳过（否则整个脚本无法运行）

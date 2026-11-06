@@ -46,7 +46,7 @@
 |---|---|---|---|---|
 | C-11 | 检索显著优于 LLM 自选技术 | 已证实 | 同一批 72 条：检索 61/72（0.8472）vs LLM 40/72（0.5556），并集 67/72（0.9306），`both=34` / `rag_rescues=27` / `rag_hurts=6` / `neither=5`，McNemar 精确检验 p=0.000324｜`explanation_results/eval_mapping_hybrid_20261027_094918.json`、`docs/stage_conclusion_20261027.md` §4 | 检索不进 known 判类路径，避免污染闭集指标 |
 | C-12 | 检索 84.9% 在更大候选库上依然成立 | **未支持** | 7 条库 0.8494（家族 0.9505）→ 10 条 0.4220（家族 0.9471）→ 22 条 0.3331（家族 0.7490）｜`results/2026-10-28/cti_kb_scale_{a,b,c}.json`、`cti_kb_scale_summary_20261028.json` | 对外必须连知识库规模一起报；不得称"开放候选集上的检索能力" |
-| C-13 | LLM 可直接指派 ATT&CK 技术（含 unknown 路径） | **未支持** | unknown 路径 98/100 返回 `null`；模拟未知组 LLM 0/25、检索 top-1 1/25、top-3 21/25｜`docs/stage_conclusion_20261027.md` §5、`explanation_results/unknown_explanations_model2011_ood22_20261028_093615.json` | 展示形态定为"检索 top-3 映射 + LLM 叙述" |
+| C-13 | LLM 可直接指派 ATT&CK 技术（含 unknown 路径） | **未支持** | unknown 路径 98/100 返回 `null`；单步 abstain prompt 后仍 100/100 null 且无理由（`explanation_results/unknown_explanations_abstain_20261103.json`）；两步式 `null_with_reason_rate=1.0` 但 step1 100/100 判证据不足，LLM 映射仍 0/22、0/25（`explanation_results/unknown_explanations_twostep_20261105.json`）；模拟未知组 LLM 0/25、检索 top-1 1/25、top-3 21/25｜`docs/stage_conclusion_20261027.md` §5、`explanation_results/unknown_explanations_model2011_ood22_20261028_093615.json` | 展示形态定为"检索 top-3 映射 + LLM 叙述" |
 
 ## 4. 解释质量
 
@@ -62,9 +62,12 @@
 | ID | 结论 | 状态 | 证据（数值｜产物） | 边界 |
 |---|---|---|---|---|
 | C-18 | 结论可推广到多未知家族 / 跨数据集 | **待检验** | 当前只留出 1 个 Web Attack 家族，未做 CIC-IDS2017→UNSW-NB15、时间切分、少样本 | — |
-| C-19 | 公平编码器对照（≥4 变体 × 3 seeds，控制 batch/epoch/pooling/适配）会改变现有判读 | **待检验** | A3 与 A0\* 的训练/适配尚未完全对齐 | 负结果可能被质疑"没调好" |
+| C-19 | 公平编码器对照（≥4 变体 × 3 seeds，控制 batch/epoch/pooling/适配）会改变现有判读 | 已证实（本数据/本实现） | 5 变体 backbone 级：`A0*` `tpr@fpr=1%` 0.0878 ± 0.0079（n=5）vs `A3` 0.0691 ± 0.0920（n=5），差 +1.87pp、CI 跨零；`A0*` vs `A3_adapter` +5.61pp [+3.02, +8.20]，但 AUROC −3.52pp [−6.71, −0.32]；G1 判定**不确定**（未过 ≥2pp 且 CI 不重叠）｜`results/2026-11-03/ood_multiseed_fair_encoder_n5.json`、`bootstrap_ood_ci_fair_encoder_n5.json`、`ood_fair_encoder_table_n5.md` | 仅单 Web Attack 家族；`A0*_last`/`A0_frozen` 仍 n=3；判定按 `best_llm − best_no_llm`，`best_no_llm = A3` |
 | C-20 | 语义原型在 `auroc_simulated` 或 `tpr@fpr=1%` 上带来 ≥2pp 提升 | **待检验** | 尚无原型实验产物 | — |
 | C-21 | 成本-精度 Pareto 能决定 LLM 该放哪一层 | **待检验** | 尚无延迟/显存/每千样本成本测量 | — |
+| C-22 | `llm_pooling` 由 mean 改 last 能改善 OOD | **未支持** | `A0*_last − A0*`：AUROC +0.04pp、`tpr@fpr=1%` −1.47pp、recsim +1.23pp，n=3 全跨零；二者统计不可区分｜`results/2026-11-03/ood_multiseed_fair_encoder_n5.json`、`bootstrap_ood_ci_fair_encoder_n5.json` | 只测 `last` 一处改动，未测 attention/加权 pooling |
+| C-23 | 冻结 LLM 主体（`A0_frozen`）与 LoRA 是 trade-off | 已证实 | `A0_frozen − A0*`：AUROC +3.47pp [+2.96, +3.99]、`tpr@fpr=1%` −2.68pp [−5.29, −0.08]、recsim −7.57pp [−10.74, −4.39]（n=3，t-CI）｜`results/2026-11-03/ood_fair_encoder_table_n5.md` | n=3，未补 seed；训练成本仅约 `A0*_last` 的 1/3 |
+| C-24 | A3 加 `text_adapter` 能提升 OOD | **未支持** | `A3_adapter − A3`：AUROC +0.60pp、`tpr@fpr=1%` −3.74pp、recsim −1.72pp，n=5 全部跨零；闭集 known_acc 0.9403 vs 0.9253｜`results/2026-11-03/ood_fair_encoder_table_n5.md` | adapter 只加在冻结 BERT 之后，未做 joint finetune |
 
 ## 6. 产物索引
 
@@ -79,6 +82,7 @@
 | A0\* 路由报告 | `ood_reports/ood_routing_*.json` | 明细见台账 |
 | A3 汇总 / bootstrap | `results/2026-11-03/ood_multiseed_with_a3.json`、`bootstrap_ood_ci_with_a3.json` | — |
 | 2026-10-28 汇总 / bootstrap | `results/2026-10-28/ood_multiseed_summary_20261028.json`、`bootstrap_ood_ci_20261028.json` | — |
+| 公平编码器对照（n=5 补 seed） | `results/2026-11-03/ood_multiseed_fair_encoder_n5.json`、`bootstrap_ood_ci_fair_encoder_n5.json`、`ood_fair_encoder_table_n5.md` | — |
 | 知识库规模敏感性 | `results/2026-10-28/cti_kb_scale_{a,b,c,c_behavior,c_strip}.json` | — |
 | 映射对比（McNemar） | `explanation_results/eval_mapping_hybrid_20261027_094918.json` | active |
 | 解释一致性（strict/v2/v3） | `explanation_results/eval_model2000_20261026_100154{,_rule_v2,_rule_v3}.json` | active |
@@ -90,6 +94,7 @@
 | 日期 | 版本 | 变更 |
 |---|---|---|
 | 2026-11-03 | v1.0 | 建表：21 条结论（已证实 7 / 未支持 9 / 待检验 5）按闭集、LLM 检测、映射检索、解释质量、泛化五组登记 |
+| 2026-11-05 | v1.1 | 公平编码器对照收口：C-19 由“待检验”升为“已证实（本数据/本实现）”，G1 判“不确定”；新增 C-22（last pooling 未支持）、C-23（A0_frozen trade-off 已证实）、C-24（text_adapter 未支持）；C-13 补两步式证据 |
 
 > 新增结论必须先定状态再写数值；状态升级（未支持 → 已证实）需要新的预注册口径与产物，
 > 并在此表追加变更行。
