@@ -14,6 +14,14 @@
       --scores_l1 results/2026-11-06/triage/blind_scores_L1.csv \
       --scores_l2 results/2026-11-06/triage/blind_scores_L2.csv \
       --out results/2026-11-06/triage/summary.json
+  python scripts/eval_triage.py --mode arms --key results/2026-11-06/triage/pack_key_all.json \
+      --scores_l1 results/2026-11-06/triage/blind_scores_all_L1.csv \
+      --scores_l2 results/2026-11-06/triage/blind_scores_L2.csv \
+      --jsonl results/2026-11-06/triage/gen_all4.jsonl \
+      --out results/2026-11-10/triage_delivery/summary_arms.json
+
+arms 模式只做**臂间单轮比较**（均值 ± sd、配对差、Wilcoxon p、S3 覆盖/abstain/延迟），
+不输出 κ：A1/A2 只有单轮打分，凑 L2 会伪造重测；信度仍由 `--mode agree` 负责。
 """
 import argparse
 import csv
@@ -289,6 +297,118 @@ def _read_scores(path):
     return out
 
 
+def _read_scores_opt(path):
+    """可选打分表：文件不存在时返回空字典（A1/A2 未填分是合法状态）。"""
+    if not path or not os.path.exists(os.path.join(PROJECT_ROOT, path)):
+        return {}
+    return _read_scores(path)
+
+
+def _contrast(a, b, ids, idx):
+    """配对差（a-b）：idx=0 为 actionability，1 为 sufficiency。"""
+    d = np.array([a[i][idx] - b[i][idx] for i in ids])
+    out = {"n": len(ids), "mean_diff": round(float(d.mean()), 3) if len(d) else float("nan")}
+    if len(d) > 1:
+        out["sd"] = round(float(d.std(ddof=1)), 3)
+    p = float("nan")
+    if len(d) > 5 and np.any(d != 0):
+        from scipy.stats import wilcoxon
+        p = float(wilcoxon(d).pvalue)
+    out["p"] = round(p, 4)
+    return out
+
+
+def _jsonl_by_arm(path):
+    out = {}
+    full = os.path.join(PROJECT_ROOT, path)
+    if not os.path.exists(full):
+        return out
+    with open(full, encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                r = json.loads(line)
+                out.setdefault(r["arm"], []).append(r)
+    return out
+
+
+def mode_arms(args):
+    """单轮臂间比较：四臂均值 ± sd、A1 vs 其余臂的配对差与 Wilcoxon p、
+    S3 覆盖/abstain/延迟。**不输出 κ**：A1/A2 只有单轮打分，硬凑 L2 会伪造重测。"""
+    key = json.load(open(os.path.join(PROJECT_ROOT, args.key), encoding="utf-8"))
+    rounds, used = [], []
+    for p in (args.scores_l1, args.scores_l2):
+        s = _read_scores_opt(p)
+        if s:
+            rounds.append(s)
+            used.append(os.path.basename(p))
+    if not rounds:
+        raise SystemExit("打分表都没填分（%s），无事可做" % args.scores_l1)
+
+    per_arm, n_rounds, missing = {}, {}, {}
+    for pid, meta in key.items():
+        arm, sid = meta["arm"], meta["sample_id"]
+        hit = [r[pid] for r in rounds if pid in r]
+        if not hit:
+            missing.setdefault(arm, []).append(pid)
+            continue
+        n_rounds[arm] = max(n_rounds.get(arm, 0), len(hit))
+        per_arm.setdefault(arm, {})[sid] = (float(np.mean([h[0] for h in hit])),
+                                            float(np.mean([h[1] for h in hit])))
+
+    summary = {"mode": "arms", "kappa": None,
+               "kappa_note": "单轮臂间比较不估计信度；κ 见 --mode agree",
+               "n_pack_keys": len(key), "rounds_used": used,
+               "missing": {k: sorted(v) for k, v in sorted(missing.items())},
+               "arms": {}}
+    for arm, d in sorted(per_arm.items()):
+        a = np.array([v[0] for v in d.values()])
+        s = np.array([v[1] for v in d.values()])
+        summary["arms"][arm] = {
+            "n": len(d), "n_rounds": n_rounds.get(arm, 1),
+            "actionability_mean": round(float(a.mean()), 3),
+            "actionability_sd": round(float(a.std(ddof=1)) if len(a) > 1 else 0.0, 3),
+            "sufficiency_mean": round(float(s.mean()), 3),
+            "sufficiency_sd": round(float(s.std(ddof=1)) if len(s) > 1 else 0.0, 3),
+        }
+
+    pairs = [("A1_retrieval", "A0_template"), ("A1_retrieval", "A2_llm_only"),
+             ("A1_retrieval", "A3_llm_rag"), ("A3_llm_rag", "A0_template")]
+    summary["contrasts"] = {}
+    for x, y in pairs:
+        if x in per_arm and y in per_arm:
+            ids = sorted(set(per_arm[x]) & set(per_arm[y]))
+            if ids:
+                summary["contrasts"]["%s_minus_%s" % (x, y)] = {
+                    "actionability": _contrast(per_arm[x], per_arm[y], ids, 0),
+                    "sufficiency": _contrast(per_arm[x], per_arm[y], ids, 1)}
+
+    gen = _jsonl_by_arm(args.jsonl)
+    summary["evidence"] = {}
+    for arm, sid_map in sorted(per_arm.items()):
+        rs = [r for r in gen.get(arm, []) if r["sample_id"] in sid_map]
+        if not rs:
+            continue
+        lat = sorted(float(r.get("latency_s", 0.0)) for r in rs)
+        summary["evidence"][arm] = {
+            "n": len(rs),
+            "s3_coverage": round(sum(1 for r in rs if r.get("S3")) / len(rs), 4),
+            "abstain_rate": round(sum(1 for r in rs if r.get("abstain")) / len(rs), 4),
+            "latency_s_p50": round(float(np.percentile(lat, 50)), 2),
+            "latency_s_p95": round(float(np.percentile(lat, 95)), 2),
+        }
+    summary["caveats"] = [
+        "本模式不做信度估计，不输出 κ（A1/A2 为单轮打分）",
+        "S3 覆盖率高是 BM25 恒返回 k 条的结构性结果，不等于映射正确",
+        "缺失臂写入 missing，未做任何插补",
+    ]
+
+    out = os.path.join(PROJECT_ROOT, args.out)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    json.dump(summary, open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    print(json.dumps(summary, ensure_ascii=False, indent=1))
+    print("写入", out)
+
+
 def mode_agree(args):
     from scipy.stats import wilcoxon
     key = json.load(open(os.path.join(PROJECT_ROOT, args.key), encoding="utf-8"))
@@ -346,8 +466,9 @@ def mode_agree(args):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="triage 四臂评测（gen/pack/agree）")
-    ap.add_argument("--mode", required=True, choices=["gen", "pack", "agree"])
+    ap = argparse.ArgumentParser(description="triage 四臂评测（gen/pack/agree/arms）")
+    ap.add_argument("--mode", required=True, choices=["gen", "pack", "agree", "arms"],
+                    help="arms=单轮臂间比较（不输出 κ）")
     ap.add_argument("--arms", default=",".join(ARMS_ALL))
     ap.add_argument("--labels", default="data/annotations/triage_202611.csv")
     ap.add_argument("--routing_report", default="ood_reports/ood_routing_20261105_205104.json")
@@ -366,8 +487,11 @@ def main():
     ap.add_argument("--scores_l2", default="results/2026-11-06/triage/blind_scores_L2.csv")
     ap.add_argument("--kappa_type", default="retest", choices=["retest", "inter_annotator"],
                     help="无第二标注者时为 retest（重测信度）")
+    ap.add_argument("--jsonl", default="results/2026-11-06/triage/gen_all4.jsonl",
+                    help="arms 模式统计 S3 覆盖/abstain/延迟用的生成结果")
     args = ap.parse_args()
-    {"gen": mode_gen, "pack": mode_pack, "agree": mode_agree}[args.mode](args)
+    {"gen": mode_gen, "pack": mode_pack, "agree": mode_agree,
+     "arms": mode_arms}[args.mode](args)
 
 
 if __name__ == "__main__":

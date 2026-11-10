@@ -58,7 +58,10 @@
 | C-16 | unknown 路径 LLM 解释可满足引用率关卡 | 已证实 | 100 条：`reference_rate` 1.00（≥0.90 PASS）、`unverified_number_rate` 0.09、空解释 0｜`docs/stage_conclusion_20261027.md` §5（C1）、`explanation_results/unknown_explanations_model2011_ood22_20261028_093615.json` | 抽样按 `unknown_origin` 分层；路由回归 `routed` 与基线逐位一致 |
 | C-17 | LLM 解释比模板解释更有用（人工可感知价值） | **未支持** | 20 条 unknown 样本盲标（L1+L2 两轮取均值，`A0` 模板 vs `A3` LLM+RAG）：`actionability` 3.00 ± 0.00 vs 2.925 ± 0.977，配对差 **−0.075**、Wilcoxon `p=0.555`（10 胜 0 平 10 负）；`sufficiency` 3.00 vs 4.50，差 +1.50、`p=0.0001`（20 胜 0 平 0 负）｜`results/2026-11-06/triage/summary_kappa.json`、`blind_pack.csv`、`blind_scores_L1/L2.csv` | 主指标 `actionability` 无差异；`sufficiency` 增益来自 S2/S4/S5 填得更满，**S3（ATT&CK）两臂皆空**（`A3` 20/20 abstain），不含技术定位能力；κ=0.748/0.757 为**重测信度**（单人，非标注者间）；n=20，仅 `dataset_200 / split_openset_0`；详见 **C-26** |
 
+| ID | 结论 | 状态 | 证据（数值｜产物） | 边界 |
+|---|---|---|---|---|
 | C-26 | **方向 2 终局**：LLM+RAG 解释层相对模板/检索在 triage `actionability` 上无可检测增益 | **未支持** | 四臂中 `A0`/`A3` 已完成人工盲评（`A1` 未标，不影响判定：`max(A0,A1) ≥ A0 = 3.00 > A3 = 2.925`，差值上限 −0.075 < 门槛 +1.00）：`A3 − A0` = **−0.075**、`p=0.555`，未过"≥1 分且 p<0.05"门；κ（`actionability` 0.748 / `sufficiency` 0.757，n=40，重测）达标后才出此判定｜`results/2026-11-06/triage/summary_kappa.json`、`gen_all4.jsonl`（80 行）、`blind_pack.csv` | 仅 `dataset_200 / split_openset_0`、n=20、`qwen2.5-1.5b`、检索 `k=3`。**不再扩量**：扩量只会把 −0.075 估得更准，不会翻正。abstain 退化：`A0` 20/20、`A1` 0/20、`A2` 20/20、`A3` 20/20，除 `A1` 外三臂恒 100%，`abstain` 校准在本批无区分度 |
+| C-27 | 检索-only（BM25 + 规则拼装、不开 LLM）的 triage 卡片可作为 unknown 处置交付形态 | **不确定** | 客观面已达标：`cards_all516.csv` 516 行 / `cards_true249.csv` 249 行，五槽非空率 1.00、`S3` 覆盖 1.00、abstain 0/516、单卡 BM25 检索 p50 **0.12 ms** / p95 **0.34 ms**（CPU、无模型加载），`top1` 复算一致 **516/516**；置信 high 81 / med 90 / low 345（真未知 249 条中 high 仅 9）；`--mode arms` 复现 A0 3.00 / A3 2.925、`p=0.5552` 与 C-26 逐位一致｜`results/2026-11-10/triage_delivery/`（`cards_all516.csv`、`cards_true249.csv`、`sample_cards.md`、`metrics.json`、`summary_arms.json`）、`scripts/triage_card.py` | **人评未完成**：`blind_pack_a1a2.csv` 38 行未标，`A1−A3` 的 `actionability` 无法计算，判定门落"不确定"，不写"可交付/不足"。`S3` 覆盖 100% 是结构性的（BM25 恒返回 k=3），**不等于映射正确**；真未知 249 条无 ATT&CK 真值；部署视图 516 条里 267 条是已知类误报（`Bot` 159/159 全被判 unknown），不得合并成"未知召回" |
 
 ## 5. 泛化与工程结论
 
@@ -91,6 +94,7 @@
 | 解释一致性（strict/v2/v3） | `explanation_results/eval_model2000_20261026_100154{,_rule_v2,_rule_v3}.json` | active |
 | 检索命中率 | `explanation_results/eval_retrieval_20261026_105616.json` | active |
 | unknown 路径解释 | `explanation_results/unknown_explanations_model2011_ood22_20261028_093615.json` | active |
+| 检索-only 交付卡片（C-27） | `results/2026-11-10/triage_delivery/`（`cards_all516.csv`、`cards_true249.csv`、`sample_cards.md`、`metrics.json`、`summary_arms.json`）、`scripts/triage_card.py` | — |
 
 ## 7. 变更记录
 
@@ -100,6 +104,7 @@
 | 2026-11-05 | v1.1 | 公平编码器对照收口：C-19 由“待检验”升为“已证实（本数据/本实现）”，G1 判“不确定”；新增 C-22（last pooling 未支持）、C-23（A0_frozen trade-off 已证实）、C-24（text_adapter 未支持）；C-13 补两步式证据 |
 | 2026-11-10 | v1.3 | 方向 2（unknown triage）收口：新增 C-26（四臂 `actionability` 无可检测增益，`A3−A0` −0.075、p=0.555）；C-17 由 `待检验` 改为 `未支持`（首个人工盲评证据，κ 0.748/0.757 为重测信度）；更正 `eval_triage.py` 的 κ 标签（函数实为不加权 Cohen's κ，原打印误写"线性加权"） |
 | 2026-11-06 | v1.2 | G1 **终局判定**固化为 C-25（`未支持`：+1.87pp、t-CI [−8.85, +12.59] 跨零，未过 ≥2pp 门槛）；C-19 边界加指向 C-25；明确本阶段不再新增检测变体，`A3_ft`（文本特征离线预算，加开关只会得到与 A3 等价的假变体）与 `A0*_cti`（无文本列）不参评 |
+| 2026-11-10 | v1.4 | 检索-only 交付形态收口：新增 C-27（**不确定**——客观指标全达标，`A1−A3` 人评 38 行未标，判定门落"不确定"）；新增 `scripts/triage_card.py` 与 `results/2026-11-10/triage_delivery/`；`eval_triage.py` 增 `--mode arms`（单轮臂间比较，**不输出 κ**，A1/A2 缺分写 `missing` 不插补）；补 C-26 所在表头（原 C-26 为缺表头的孤立行） |
 
 > 新增结论必须先定状态再写数值；状态升级（未支持 → 已证实）需要新的预注册口径与产物，
 > 并在此表追加变更行。

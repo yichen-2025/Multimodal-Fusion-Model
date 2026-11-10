@@ -1,0 +1,96 @@
+{
+ "routing_report": "ood_reports/ood_routing_20261105_205104.json",
+ "ood_id": 97,
+ "n_routing_log": 516,
+ "n_global_matched": 516,
+ "n_unmatched": 0,
+ "n_cards_all": 516,
+ "n_cards_true_unknown": 249,
+ "rerun_top1_agree": 516,
+ "rerun_top1_agree_rate": 1.0,
+ "confidence_thresholds": {
+  "s33_top1": 2.8422,
+  "s67_top1": 3.6923,
+  "g33_gap": 0.5333,
+  "g67_gap": 1.3422,
+  "n_distinct_top1": 18,
+  "n_distinct_gap": 31,
+  "rule": "high = top1.score>=s67 且 (top1-top2)>=g67；med = top1.score>=s33 且间隔>=g33；其余 low。s33/s67、g33/g67 取本报告 516 条 BM25 分数的 33/67 分位，且分位在**去重取值**上计算（分数离散，避免截断在众数上）"
+ },
+ "views": {
+  "all": {
+   "n": 516,
+   "slot_nonempty_rate": {
+    "S1": 1.0,
+    "S2": 1.0,
+    "S3": 1.0,
+    "S4": 1.0,
+    "S5": 1.0
+   },
+   "s3_coverage": 1.0,
+   "abstain_rate": 0.0,
+   "confidence": {
+    "high": 81,
+    "med": 90,
+    "low": 345
+   },
+   "true_label_dist": {
+    "0": 31,
+    "1": 17,
+    "2": 5,
+    "3": 14,
+    "4": 3,
+    "6": 17,
+    "8": 21,
+    "9": 159,
+    "10": 249
+   }
+  },
+  "true_unknown": {
+   "n": 249,
+   "slot_nonempty_rate": {
+    "S1": 1.0,
+    "S2": 1.0,
+    "S3": 1.0,
+    "S4": 1.0,
+    "S5": 1.0
+   },
+   "s3_coverage": 1.0,
+   "abstain_rate": 0.0,
+   "confidence": {
+    "high": 9,
+    "med": 7,
+    "low": 233
+   },
+   "true_label_dist": {
+    "10": 249
+   }
+  }
+ },
+ "unknown_origin_dist": {
+  "0": 267,
+  "1": 219,
+  "2": 30
+ },
+ "latency_ms": {
+  "retrieve_first_call": 3.0945,
+  "retrieve": {
+   "n": 515,
+   "p50": 0.1161,
+   "p95": 0.3445,
+   "max": 52.6187
+  },
+  "assemble": {
+   "n": 515,
+   "p50": 0.0172,
+   "p95": 0.0486,
+   "max": 56.2088
+  }
+ },
+ "caveats": [
+  "S3 覆盖 100% 是结构性的：BM25 恒返回 k 条，只说明检索给了编号，不等于编号正确",
+  "真未知 249 条无 ATT&CK 真值，不得据此声称映射正确率",
+  "本视图含 267 条已知类误判（OOD 误报），不合并成单一未知召回",
+  "retrieve_ms 为本机 CPU 单条 BM25 查询耗时，不含模型加载"
+ ]
+}

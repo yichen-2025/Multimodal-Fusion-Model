@@ -1,0 +1,109 @@
+{
+ "mode": "arms",
+ "kappa": null,
+ "kappa_note": "单轮臂间比较不估计信度；κ 见 --mode agree",
+ "n_pack_keys": 78,
+ "rounds_used": [
+  "blind_scores_all_L1.csv",
+  "blind_scores_L2.csv"
+ ],
+ "missing": {
+  "A1_retrieval": [
+   "p041",
+   "p043",
+   "p045",
+   "p047",
+   "p048",
+   "p050",
+   "p052",
+   "p054",
+   "p056",
+   "p058",
+   "p060",
+   "p062",
+   "p063",
+   "p065",
+   "p067",
+   "p069",
+   "p071",
+   "p073",
+   "p075",
+   "p077"
+  ],
+  "A2_llm_only": [
+   "p042",
+   "p044",
+   "p046",
+   "p049",
+   "p051",
+   "p053",
+   "p055",
+   "p057",
+   "p059",
+   "p061",
+   "p064",
+   "p066",
+   "p068",
+   "p070",
+   "p072",
+   "p074",
+   "p076",
+   "p078"
+  ]
+ },
+ "arms": {
+  "A0_template": {
+   "n": 20,
+   "n_rounds": 2,
+   "actionability_mean": 3.0,
+   "actionability_sd": 0.0,
+   "sufficiency_mean": 3.0,
+   "sufficiency_sd": 0.0
+  },
+  "A3_llm_rag": {
+   "n": 20,
+   "n_rounds": 2,
+   "actionability_mean": 2.925,
+   "actionability_sd": 0.977,
+   "sufficiency_mean": 4.5,
+   "sufficiency_sd": 0.459
+  }
+ },
+ "contrasts": {
+  "A3_llm_rag_minus_A0_template": {
+   "actionability": {
+    "n": 20,
+    "mean_diff": -0.075,
+    "sd": 0.977,
+    "p": 0.5552
+   },
+   "sufficiency": {
+    "n": 20,
+    "mean_diff": 1.5,
+    "sd": 0.459,
+    "p": 0.0001
+   }
+  }
+ },
+ "evidence": {
+  "A0_template": {
+   "n": 20,
+   "s3_coverage": 0.0,
+   "abstain_rate": 1.0,
+   "latency_s_p50": 0.0,
+   "latency_s_p95": 0.0
+  },
+  "A3_llm_rag": {
+   "n": 20,
+   "s3_coverage": 0.0,
+   "abstain_rate": 1.0,
+   "latency_s_p50": 8.07,
+   "latency_s_p95": 10.13
+  }
+ },
+ "caveats": [
+  "本模式不做信度估计，不输出 κ（A1/A2 为单轮打分）",
+  "S3 覆盖率高是 BM25 恒返回 k 条的结构性结果，不等于映射正确",
+  "缺失臂写入 missing，未做任何插补"
+ ]
+}

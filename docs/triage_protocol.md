@@ -103,3 +103,67 @@
 - 不评测检测指标（G1 已终局），不新增检测变体。
 - `A1` 的检索库与 `A3` 同一套 CTI 文档，所以 `A3` 相对 `A1` 的增益只可能是"组织与措辞"，不可能是"多知道事实"。
 - 留出类为 Web Attack / Other Attack，只有单数据集 `dataset_200`，结论不能外推到其他数据集。
+
+## 10. 交付形态：检索-only 卡片（`scripts/triage_card.py`）
+
+用途：把一份路由报告里**全部被判 unknown** 的样本转成运维可读卡片，**不加载 LLM、不导入 torch**，纯 CPU。
+输入是报告里已存的 `cti_rag_explanation`（与 `A3` 同一份证据）；脚本另外真跑一次 `build_cti_explanation`
+只为计时与一致性校验，不改写已存证据。
+
+```bash
+/root/miniconda3/bin/python scripts/triage_card.py \
+  --routing_report ood_reports/ood_routing_20261105_205104.json \
+  --outdir results/2026-11-10/triage_delivery --limit 0
+```
+
+### 10.1 五槽拼装规则（无 LLM，全部规则化）
+
+| 槽 | 来源与规则 |
+|---|---|
+| `S1` | `behavior_tokens` → `行为特征：port_80、pkt_small、dur_short、pps_low。`（与 `A1` 臂同模板） |
+| `S2` | `top_k` 前 3 条 → `Txxxx 名称（BM25 s，置信）`；第 1 条的置信取卡片级 `confidence`，其余恒 `low` |
+| `S3` | `[top_k[0].id]`（只给 top-1；`top_k` 为空时为空数组并置 `abstain=true`） |
+| `S4` | `按 {top1.id} 的检测线索（detection 首句）排查同类流量；并提取该来源近 1 小时全量流量复核端口/协议分布。` |
+| `S5` | 固定边界句：`仅 BM25 检索 top-3 相似度，检索相似不等于归因；未验证样本真实性，不覆盖 ATT&CK 映射正确性。` |
+
+### 10.2 置信分级口径
+
+- `confidence = high / med / low`，由 `top1.score` 与间隔 `top1 − top2` 决定：
+  `high` = 两者均 ≥ 各自的 67 分位；`med` = 两者均 ≥ 各自的 33 分位；其余 `low`。
+- **分位数在去重取值上计算**：BM25 分数是离散的（本报告 `top1` 仅 18 个取值、间隔 31 个取值），
+  直接取分位会截断在众数上；实测切点 `s33=2.8422 / s67=3.6923`、`g33=0.5333 / g67=1.3422`。
+- 阈值固定由该报告 516 条算一次，不随 `--limit` 变化，也不人工调整；实测分布
+  `high 81 / med 90 / low 345`（真未知 249 条中 `high` 仅 9、`med` 7、`low` 233）。
+- 分位来自路由报告的分数分布，**不是** `gen_all4.jsonl`（该文件不含 BM25 分数，只有五槽文本）。
+
+### 10.3 输出与指标口径
+
+| 产物 | 内容 |
+|---|---|
+| `cards_all516.csv` | 部署视角：全部被路由为 unknown 的 516 条（含 267 条已知类误判） |
+| `cards_true249.csv` | 真未知视角：`true_label=10` 的 249 条 |
+| `sample_cards.md` | 3 张真未知 + 2 张误报的可读样例 |
+| `metrics.json` | 两视图的五槽非空率、`S3` 覆盖、abstain、置信分布、`retrieve_ms` p50/p95、`top1` 复算一致率、阈值 |
+
+- 实测：五槽非空率 1.00、`S3` 覆盖 1.00、abstain 0/516、`retrieve_ms` p50 0.12 ms / p95 0.34 ms
+  （首调用含建索引 ~3 ms）、`top1` 复算一致 516/516、`recover_global_indices` 匹配 516/516。
+- **`S3` 覆盖 100% 是结构性的**：BM25 恒返回 `k=3`，所以只要检索跑通就一定给编号，`abstain` 恒 false。
+  这只是描述性指标，**不能当作解释质量证据**；与 `A3` 的 `S3` 0/20 对比时也要注明原因（LLM 选择 abstain，不是检索失败）。
+- 真未知 249 条没有 ATT&CK 真值，故**不得**从 `S3` 覆盖推出"映射正确率"；映射能力只能引已知攻击 72 条上的 61/72（C-13）。
+- 部署视图里 516 条按 `true_label` 分层报数，不合并成单一"未知召回"：`Bot` 159/159 全部被误判为 unknown。
+
+### 10.4 臂间汇总（`--mode arms`）
+
+```bash
+/root/miniconda3/bin/python scripts/eval_triage.py --mode arms \
+  --key results/2026-11-06/triage/pack_key_all.json \
+  --scores_l1 results/2026-11-06/triage/blind_scores_all_L1.csv \
+  --scores_l2 results/2026-11-06/triage/blind_scores_L2.csv \
+  --jsonl results/2026-11-06/triage/gen_all4.jsonl \
+  --out results/2026-11-10/triage_delivery/summary_arms.json
+```
+
+- 输出：各臂 `actionability/sufficiency` 均值 ± sd、`A1 vs A0/A2/A3` 与 `A3 vs A0` 的配对差 + Wilcoxon `p`、
+  各臂 `S3` 覆盖 / abstain / 延迟；未打分的 `pack_id` 写入 `missing`，**不插补**。
+- **不输出 κ**：`A1/A2` 只有单轮打分，硬凑 L2 会伪造重测；信度仍由 `--mode agree` 负责。
+- 回归自检：`A0` 3.00 / `A3` 2.925、`A3 − A0` −0.075、`p=0.5552`，与 `summary_kappa.json` 逐位一致。
