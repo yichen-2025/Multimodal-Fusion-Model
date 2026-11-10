@@ -56,7 +56,9 @@
 | C-14 | 解释一致性 0.56 反映解释质量差 | **未支持** | 同一份 JSON 换尺子：`strict_v1` 0.56、`family_v2` 0.81，人工抽检 20/20 与 `family_v2` 一致；0.56 主因是词表过窄｜`explanation_results/eval_model2000_20261026_100154.json`（v2/v3 版本）｜`docs/stage_conclusion_20261027.md` §5 | 真正跑偏的是只复述特征、不给类别结论的样本，需单独统计 |
 | C-15 | 解释中的数字不编造（`unverified_number_rate ≤ 0.05`） | **未支持** | legacy 0.20 → v2 0.13 → v3 0.11（11/100），关卡 0.05 未达；剩余为 1.5B 模型的真实量级改写（如 `6.329e+07` 写成 `6.329亿`）｜`explanation_results/eval_model2000_20261026_100154_rule_v3.json` | 唯一有效手段是改 prompt，但一致性会从 0.81 掉到 0.70，净负收益，已回退 |
 | C-16 | unknown 路径 LLM 解释可满足引用率关卡 | 已证实 | 100 条：`reference_rate` 1.00（≥0.90 PASS）、`unverified_number_rate` 0.09、空解释 0｜`docs/stage_conclusion_20261027.md` §5（C1）、`explanation_results/unknown_explanations_model2011_ood22_20261028_093615.json` | 抽样按 `unknown_origin` 分层；路由回归 `routed` 与基线逐位一致 |
-| C-17 | LLM 解释比模板解释更有用（人工可感知价值） | **待检验** | 无人工盲评、无忠实性/反事实检验｜— | 0.81/0.11 属自动指标，不足以支撑"有用" |
+| C-17 | LLM 解释比模板解释更有用（人工可感知价值） | **未支持** | 20 条 unknown 样本盲标（L1+L2 两轮取均值，`A0` 模板 vs `A3` LLM+RAG）：`actionability` 3.00 ± 0.00 vs 2.925 ± 0.977，配对差 **−0.075**、Wilcoxon `p=0.555`（10 胜 0 平 10 负）；`sufficiency` 3.00 vs 4.50，差 +1.50、`p=0.0001`（20 胜 0 平 0 负）｜`results/2026-11-06/triage/summary_kappa.json`、`blind_pack.csv`、`blind_scores_L1/L2.csv` | 主指标 `actionability` 无差异；`sufficiency` 增益来自 S2/S4/S5 填得更满，**S3（ATT&CK）两臂皆空**（`A3` 20/20 abstain），不含技术定位能力；κ=0.748/0.757 为**重测信度**（单人，非标注者间）；n=20，仅 `dataset_200 / split_openset_0`；详见 **C-26** |
+
+| C-26 | **方向 2 终局**：LLM+RAG 解释层相对模板/检索在 triage `actionability` 上无可检测增益 | **未支持** | 四臂中 `A0`/`A3` 已完成人工盲评（`A1` 未标，不影响判定：`max(A0,A1) ≥ A0 = 3.00 > A3 = 2.925`，差值上限 −0.075 < 门槛 +1.00）：`A3 − A0` = **−0.075**、`p=0.555`，未过"≥1 分且 p<0.05"门；κ（`actionability` 0.748 / `sufficiency` 0.757，n=40，重测）达标后才出此判定｜`results/2026-11-06/triage/summary_kappa.json`、`gen_all4.jsonl`（80 行）、`blind_pack.csv` | 仅 `dataset_200 / split_openset_0`、n=20、`qwen2.5-1.5b`、检索 `k=3`。**不再扩量**：扩量只会把 −0.075 估得更准，不会翻正。abstain 退化：`A0` 20/20、`A1` 0/20、`A2` 20/20、`A3` 20/20，除 `A1` 外三臂恒 100%，`abstain` 校准在本批无区分度 |
 
 ## 5. 泛化与工程结论
 
@@ -96,6 +98,7 @@
 |---|---|---|
 | 2026-11-03 | v1.0 | 建表：21 条结论（已证实 7 / 未支持 9 / 待检验 5）按闭集、LLM 检测、映射检索、解释质量、泛化五组登记 |
 | 2026-11-05 | v1.1 | 公平编码器对照收口：C-19 由“待检验”升为“已证实（本数据/本实现）”，G1 判“不确定”；新增 C-22（last pooling 未支持）、C-23（A0_frozen trade-off 已证实）、C-24（text_adapter 未支持）；C-13 补两步式证据 |
+| 2026-11-10 | v1.3 | 方向 2（unknown triage）收口：新增 C-26（四臂 `actionability` 无可检测增益，`A3−A0` −0.075、p=0.555）；C-17 由 `待检验` 改为 `未支持`（首个人工盲评证据，κ 0.748/0.757 为重测信度）；更正 `eval_triage.py` 的 κ 标签（函数实为不加权 Cohen's κ，原打印误写"线性加权"） |
 | 2026-11-06 | v1.2 | G1 **终局判定**固化为 C-25（`未支持`：+1.87pp、t-CI [−8.85, +12.59] 跨零，未过 ≥2pp 门槛）；C-19 边界加指向 C-25；明确本阶段不再新增检测变体，`A3_ft`（文本特征离线预算，加开关只会得到与 A3 等价的假变体）与 `A0*_cti`（无文本列）不参评 |
 
 > 新增结论必须先定状态再写数值；状态升级（未支持 → 已证实）需要新的预注册口径与产物，

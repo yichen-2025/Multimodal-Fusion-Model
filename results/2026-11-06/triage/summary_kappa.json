@@ -1,0 +1,28 @@
+{
+ "kappa_actionability": 0.7484276729559749,
+ "kappa_sufficiency": 0.757085020242915,
+ "n_pack": 40,
+ "kappa_type": "retest",
+ "arms": {
+  "A0_template": {
+   "n": 20,
+   "actionability_mean": 3.0,
+   "actionability_sd": 0.0,
+   "sufficiency_mean": 3.0
+  },
+  "A3_llm_rag": {
+   "n": 20,
+   "actionability_mean": 2.925,
+   "actionability_sd": 0.977,
+   "sufficiency_mean": 4.5
+  }
+ },
+ "contrasts": {
+  "A3_minus_A0_template": {
+   "n": 20,
+   "mean_diff": -0.075,
+   "p": 0.5552
+  }
+ },
+ "verdict": "negative_or_inconclusive"
+}

@@ -298,7 +298,7 @@ def mode_agree(args):
         raise SystemExit("两份打分表没有共同的 pack_id（是否没填分？）")
     ka = _weighted_kappa([l1[p][0] for p in common], [l2[p][0] for p in common])
     ks = _weighted_kappa([l1[p][1] for p in common], [l2[p][1] for p in common])
-    print("共同 pack_id=%d | actionability κ=%.3f | sufficiency κ=%.3f（线性加权，L1 vs L2）"
+    print("共同 pack_id=%d | actionability κ=%.3f | sufficiency κ=%.3f（Cohen's κ，不加权；L1 vs L2）"
           % (len(common), ka, ks))
 
     per_arm = {}
