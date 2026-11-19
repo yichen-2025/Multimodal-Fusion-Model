@@ -1,0 +1,27 @@
+{
+  "experiment": "E0 轻量基线",
+  "model": "mlp",
+  "seed": 42,
+  "split_dir": "split_data/dataset_200/split_openset_0",
+  "n_train": 6362,
+  "n_features": 79,
+  "closed_set": {
+    "n_test_known": 1655,
+    "accuracy": 0.9854984894259818,
+    "macro_f1": 0.9858034318909068,
+    "val_accuracy": 0.9857142857142858
+  },
+  "ood_max_softmax": {
+    "n_genuine": 222,
+    "n_simulated": 163,
+    "auroc_genuine": 0.8322568792357312,
+    "tpr_at_fpr1_genuine": 0.04504504504504504,
+    "threshold_fpr1": 0.3201430141925812,
+    "tpr_at_fpr1_simulated": 0.006134969325153374,
+    "unknown_recall_simulated": 0.006134969325153374
+  },
+  "timing": {
+    "train_seconds": 594.46,
+    "infer_ms_per_1k": 98.28
+  }
+}

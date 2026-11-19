@@ -1,0 +1,61 @@
+{
+  "experiment": "E8 模态信息审计",
+  "split_dir": "split_data/dataset_200/split_openset_0",
+  "n_train": 6362,
+  "n_val": 910,
+  "n_test": 1655,
+  "dims": {
+    "features": 79,
+    "text": 768
+  },
+  "e81_predictability": {
+    "features_to_text": {
+      "alpha": 0.1,
+      "val_r2_variance_weighted": 0.636620121359005,
+      "test": {
+        "r2_mean_per_dim": 0.4255071462274517,
+        "r2_median_per_dim": 0.4511180170673015,
+        "r2_variance_weighted": 0.4980844656904194,
+        "r2_min_dim": -0.3388756207370305,
+        "r2_max_dim": 0.7428667099837566,
+        "n_dims_above_0.8": 0,
+        "n_dims": 768
+      },
+      "train_r2_variance_weighted": 0.6452347679346571
+    },
+    "text_to_features": {
+      "alpha": 0.1,
+      "val_r2_variance_weighted": 0.6275527656738326,
+      "test": {
+        "r2_mean_per_dim": 0.7843052746328867,
+        "r2_median_per_dim": 0.8945062545964768,
+        "r2_variance_weighted": 0.6905321151832224,
+        "r2_min_dim": 0.03583531335061152,
+        "r2_max_dim": 1.0,
+        "n_dims_above_0.8": 53,
+        "n_dims": 79
+      },
+      "train_r2_variance_weighted": 0.8696774593583574
+    },
+    "conclusion_rule": "79->768 的 test R² 越高 → 文本越冗余（H1 成立）"
+  },
+  "e82_conditional_mi": {
+    "entropy_y_test_nats": 2.3019221878883322,
+    "ce_features": 0.17120934757372405,
+    "ce_text": 0.06778815341169225,
+    "ce_features_plus_text": 0.050003449819866895,
+    "acc_features": 0.9673716012084592,
+    "acc_text": 0.9818731117824774,
+    "acc_features_plus_text": 0.9873111782477342,
+    "I_text_y_nats": 2.23413403447664,
+    "I_features_y_nats": 2.130712840314608,
+    "I_text_y_given_features_nats": 0.12120589775385715,
+    "I_text_y_given_features_bootstrap_ci95": [
+      0.07700005384992734,
+      0.1797980301921368
+    ],
+    "boot": 500,
+    "estimator": "multinomial logistic regression CE difference (plug-in), bootstrap resamples test rows only (no refit)",
+    "conclusion_rule": "I(text;y|features) ≈ 0（CI 覆盖 0 且上界很小）→ 文本无独立信息"
+  }
+}
