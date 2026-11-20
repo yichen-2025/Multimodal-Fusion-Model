@@ -22,6 +22,7 @@ e5 = load("results", "2026-11-20", "e5_qwen", "metrics.json")
 e9 = load("results", "2026-11-20", "e9_qwen7b", "metrics.json")
 e6b = load("results", "2026-11-20", "e6_bert", "metrics.json")
 e6q = load("results", "2026-11-20", "e6_qwen", "metrics.json")
+e84 = load("results", "2026-11-20", "e84_retrain", "metrics.json")
 ood = load("results", "2026-11-03", "ood_multiseed_with_a3.json")
 
 
@@ -90,7 +91,7 @@ t0 = f"""# 第 6 章 · 语义先验：章首对照表与判定汇总
 > 口径说明：首行（E0）是**闭集**协议（10 类，无未知类）下的准确率；A3/A0* 行为**开集**协议下的已知类准确率（含未知类拒识的影响），二者不可直接相减。零样本/少样本行为闭集原型分类。
 > 关键读法：全监督上界 {e0["closed_set"]["accuracy"]:.3f}–0.994，零样本 0.11–0.15，20-shot 0.22–0.52。**差距来自标注信息，而不是编码器容量**（E9 已证 110M→7B 不改善）。
 
-## 表 6-5 预注册判定汇总（门槛来自总纲 v1.1/v1.2，跑数前固定）
+## 表 6-5 预注册判定汇总（门槛来自总纲 v1.1/v1.2 与 C-30，跑数前固定）
 
 | 实验 | 预注册门槛 | 实测 | 判定 |
 |---|---|---|---|
@@ -103,10 +104,10 @@ t0 = f"""# 第 6 章 · 语义先验：章首对照表与判定汇总
 | E6 开集三臂（BERT） | `tpr@fpr=1%` 热启动 − 零样本 ≥ 2pp 且 CI 不跨零 | {e6b["arms"]["zero_shot"]["tpr_at_fpr1_genuine"]:.4f} → {e6b["arms"]["warm_start"]["tpr_at_fpr1_genuine"]:.4f}（+{(e6b["arms"]["warm_start"]["tpr_at_fpr1_genuine"] - e6b["arms"]["zero_shot"]["tpr_at_fpr1_genuine"]) * 100:.2f}pp） | **未达标** |
 | E6 开集三臂（Qwen1.5B） | 同上 | AUROC {e6q["arms"]["zero_shot"]["auroc_genuine"]:.4f} → {e6q["arms"]["warm_start"]["auroc_genuine"]:.4f}（热启动更差） | **未达标** |
 | E7 原型构造消融 | 描述性（无门槛） | 描述来源/原型条数/距离全组合均在随机水平附近 | **描述不是瓶颈** |
-| E8.4 去文本消融 | Δacc 不显著下降 | 旧 no_text 产物跨批次（闭集 0.54–0.71），不可采信 | **待检验** |
+| E8.4 去文本消融（C-30 重训） | 5 seed bootstrap CI 下界 > −1pp → 文本可省 | 5 seeds `A0*_no_text` {e84["acc_no_text_mean"]:.4f} ± {e84["acc_no_text_sd"]:.4f}，A0\\* 基准 {e84["baseline"]["acc"]:.4f} → Δ = **{e84["delta_pp"]:+.2f}pp** CI[{e84["delta_ci95_pp"][0]:+.2f}, {e84["delta_ci95_pp"][1]:+.2f}] | **未通过**（不能声称文本可省） |
 | E9 容量阶梯 | `tpr@fpr=1%` 较 BERT +2pp 且 CI 不跨零 | 0.0000 vs 0.0000（Δtpr=0）；AUROC 0.741→0.614→0.477 | **未达标（容量无效）** |
 
-**汇总**：语义先验路线（E3–E9）在三个编码器、五种原型来源、全部构造组合下均未达门槛；唯一未定项是 E8.4（与语义先验无关，属机制章）。
+**汇总**：语义先验路线（E3–E9）在三个编码器、五种原型来源、全部构造组合下均未达门槛；E8.4 已按 C-30 判「未通过」，且与 LLM 容量混叠，只能得出「不能声称文本可省」，不得反推「文本携带独立信息」。**本轮无「待检验」项。**
 """
 
 p = os.path.join(OUT, "ch6_tables.md")
