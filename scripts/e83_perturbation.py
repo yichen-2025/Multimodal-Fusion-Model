@@ -32,8 +32,11 @@ NUM_KNOWN = 10
 GATE_FLIP = 0.20
 
 
-def build_cases(df, X, rng):
-    """为每条已知样本配一个同类 donor，生成文本扰动与特征扰动。"""
+def build_cases(df, X, rng, donor_mode="same"):
+    """为每条已知样本配一个 donor，生成文本扰动与特征扰动。
+
+    donor_mode=same：同类别真实样本（主协议）；cross：跨类别（阳性对照，仅补充用）。
+    """
     y = df["Label"].to_numpy(dtype=np.int64)
     known = y < NUM_KNOWN
     cols = select_numeric_columns(df)
@@ -42,8 +45,9 @@ def build_cases(df, X, rng):
 
     rows, xs, texts, xs_p, texts_p = [], [], [], [], []
     for i in np.where(known)[0]:
-        pool = np.where(y == y[i])[0]
-        pool = pool[pool != i]
+        pool = np.where(y == y[i])[0] if donor_mode == "same" else np.where(y != y[i])[0]
+        if donor_mode == "same":
+            pool = pool[pool != i]
         j = int(rng.choice(pool))
 
         row = df.iloc[i].copy()
@@ -81,6 +85,8 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--batch_size", type=int, default=8)
     ap.add_argument("--max_length", type=int, default=256)
+    ap.add_argument("--donor", choices=["same", "cross"], default="same",
+                    help="same=同类真实样本（主协议）；cross=跨类（阳性对照）")
     ap.add_argument("--boot", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
@@ -94,7 +100,7 @@ def main():
     X = d["scaled_features"].astype(np.float32)
     assert len(df) == len(X), (len(df), len(X))
 
-    rows, y_known, Xo, To, Xp, Tp = build_cases(df, X, rng)
+    rows, y_known, Xo, To, Xp, Tp = build_cases(df, X, rng, args.donor)
     print(f"[cases] 已知样本 {len(rows)}，文本扰动 {len(Tp)} 条")
 
     model = MultiModalFusionModel.from_pretrained(
@@ -125,8 +131,9 @@ def main():
         "split_dir": args.split_dir,
         "model_dir": args.model_dir,
         "protocol": {
-            "target": "TEXT_FEATURES 20 字段（同类别真实样本替换）",
-            "text_perturb": "重生成文本模板，数值来自同 label donor",
+            "donor": args.donor,
+            "target": "TEXT_FEATURES 20 字段（真实样本替换）",
+            "text_perturb": f"重生成文本模板，数值来自 donor（{args.donor}）",
             "feature_perturb": "仅替换同 20 字段对应的数值特征，文本不动",
             "n_known": int(n),
         },

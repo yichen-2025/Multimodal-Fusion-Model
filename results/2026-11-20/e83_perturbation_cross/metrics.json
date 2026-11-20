@@ -1,0 +1,35 @@
+{
+  "experiment": "E8.3 文本扰动审计",
+  "split_dir": "split_data/dataset_200/split_openset_0",
+  "model_dir": "saved_models/model_2013",
+  "protocol": {
+    "donor": "cross",
+    "target": "TEXT_FEATURES 20 字段（真实样本替换）",
+    "text_perturb": "重生成文本模板，数值来自 donor（cross）",
+    "feature_perturb": "仅替换同 20 字段对应的数值特征，文本不动",
+    "n_known": 1655
+  },
+  "original_acc": 0.9939577039274925,
+  "text_flip_rate": 0.6616314199395771,
+  "text_flip_ci95": [
+    0.6386706948640484,
+    0.6833836858006043
+  ],
+  "feature_flip_rate": 0.10090634441087613,
+  "feature_flip_ci95": [
+    0.08638972809667674,
+    0.11540785498489425
+  ],
+  "feature_minus_text_ci95": [
+    -0.5885347432024169,
+    -0.5329305135951662
+  ],
+  "flip_both": 0.05981873111782477,
+  "flip_neither": 0.2972809667673716,
+  "gate": {
+    "text_flip_lt": 0.2,
+    "pass": false
+  },
+  "seed": 42,
+  "batch_size": 8
+}

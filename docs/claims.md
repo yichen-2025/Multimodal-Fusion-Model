@@ -74,7 +74,7 @@
 | C-22 | `llm_pooling` 由 mean 改 last 能改善 OOD | **未支持** | `A0*_last − A0*`：AUROC +0.04pp、`tpr@fpr=1%` −1.47pp、recsim +1.23pp，n=3 全跨零；二者统计不可区分｜`results/2026-11-03/ood_multiseed_fair_encoder_n5.json`、`bootstrap_ood_ci_fair_encoder_n5.json` | 只测 `last` 一处改动，未测 attention/加权 pooling |
 | C-23 | 冻结 LLM 主体（`A0_frozen`）与 LoRA 是 trade-off | 已证实 | `A0_frozen − A0*`：AUROC +3.47pp [+2.96, +3.99]、`tpr@fpr=1%` −2.68pp [−5.29, −0.08]、recsim −7.57pp [−10.74, −4.39]（n=3，t-CI）｜`results/2026-11-03/ood_fair_encoder_table_n5.md` | n=3，未补 seed；训练成本仅约 `A0*_last` 的 1/3 |
 | C-24 | A3 加 `text_adapter` 能提升 OOD | **未支持** | `A3_adapter − A3`：AUROC +0.60pp、`tpr@fpr=1%` −3.74pp、recsim −1.72pp，n=5 全部跨零；闭集 known_acc 0.9403 vs 0.9253｜`results/2026-11-03/ood_fair_encoder_table_n5.md` | adapter 只加在冻结 BERT 之后，未做 joint finetune |
-| C-28 | **机制优先的负结果论文：E0–E8 预注册** | **部分证实** | 预注册见 §5.1（2026-11-19 跑数前登记）；结果回填见 §5.2：E0 0.9855、E8.1 R² 0.498/0.691、E8.2 `I`≈0（HGB −0.020）、E8.4 旧产物不可采信（同估计器 Δ≈0）、E3 0.1281（未支持）、E4 Δ=0、E5 0.1462、E6 未达标（均未支持）；E7 描述性；E8.3 文本翻转 2.42%（通过，E8.4 仍待检验） | 单数据集（`dataset_200 / split_openset_0`）、单模型（`qwen2.5-1.5b` + `bert`）、**无人类评测**；门槛锁定后不得事后调整 |
+| C-28 | **机制优先的负结果论文：E0–E8 预注册** | **部分证实** | 预注册见 §5.1（2026-11-19 跑数前登记）；结果回填见 §5.2：E0 0.9855、E8.1 R² 0.498/0.691、E8.2 `I`≈0（HGB −0.020）、E8.4 旧产物不可采信（同估计器 Δ≈0）、E3 0.1281（未支持）、E4 Δ=0、E5 0.1462、E6 未达标（均未支持）；E7 描述性；E8.3 文本翻转 2.42%（通过；阳性对照 66.2% 推翻「不读文本」解读，E8.4 仍待检验） | 单数据集（`dataset_200 / split_openset_0`）、单模型（`qwen2.5-1.5b` + `bert`）、**无人类评测**；门槛锁定后不得事后调整 |
 
 ### 5.1 C-28 预注册：机制优先的负结果论文（2026-11-19，跑数前登记）
 
@@ -113,7 +113,8 @@
 | E0 轻量基线 | 描述性 | 79 维 MLP：acc **0.9855**、macro-F1 **0.9858**；OOD AUROC_genuine 0.8323、`tpr@fpr=1%` 0.0450 | 只报数值 | `results/2026-11-19/e0_baseline/metrics.json` |
 | E8.1 文本↔特征可预测性 | 描述性 | 79→768：R² **0.498**（方差加权）；768→79：R² **0.691** | 只报数值（文本高度冗余） | `results/2026-11-19/e8_audit/metrics.json` |
 | E8.2 条件互信息 | `I ≈ 0` | logreg：`I(text;y\|features)` = 0.121 nats CI95 [0.077, 0.180]；HGB 复核：**−0.020** nats CI95 [−0.041, −0.004] | **I 项通过**（线性结果判估计器伪影，无正信息增量） | `results/2026-11-19/e8_audit/metrics.json`、`e8_audit_hgb/metrics.json` |
-| E8.3 反事实扰动 | 文本侧翻转率 < 0.20 | A0*（`saved_models/model_2013`）原 acc **0.9939**；同类 donor 替换 20 个 `TEXT_FEATURES`：文本侧 **2.42%** CI95 [1.69, 3.14]，特征侧 **3.38%** CI95 [2.54, 4.23]；两侧均不变 **94.4%**；差值 CI [−0.18pp, +2.00pp] 跨零 | **通过**（文本侧不高于同字段数值侧；两侧都低，功效有限，阳性对照未做） | `results/2026-11-20/e83_perturbation/metrics.json` |
+| E8.3 反事实扰动 | 文本侧翻转率 < 0.20 | A0*（`saved_models/model_2013`）原 acc **0.9939**；同类 donor 替换 20 个 `TEXT_FEATURES`：文本侧 **2.42%** CI95 [1.69, 3.14]，特征侧 **3.38%** CI95 [2.54, 4.23]；两侧均不变 **94.4%**；差值 CI [−0.18pp, +2.00pp] 跨零 | **门槛通过、解读修正**：同类内扰动不改变判定；阳性对照（跨类 66.2%）证明文本分支在读内容 → 不支持「模型不读文本」，文本无额外信息由 E8.1/E8.2 承担 | `results/2026-11-20/e83_perturbation/metrics.json` |
+| E8.3 阳性对照（跨类 donor） | 描述性（不入门槛） | 文本侧翻转 **66.2%** CI95 [63.9, 68.3]、特征侧 **10.1%** CI95 [8.6, 11.5]，特征−文本 CI [−58.9pp, −53.3pp] | **扰动有效**：文本分支对内容高度敏感，E8.3 原「模型不读文本」解读不成立 | `results/2026-11-20/e83_perturbation_cross/metrics.json` |
 | E8.4 去文本消融 | 描述性（不设门槛） | 旧产物同 seed 配对 11 对：Δacc = **+20.4pp**（sd 7.4，CI95 [19.8, 21.1]）；但 no_text 检查点闭集仅 0.54–0.71（<< E0 0.9855），属 2026-09/10 旧批次，跨批次混淆。同估计器去文本对照：logreg 0.9674→0.9873（+2.0pp）、HGB 0.9958→0.9897（−0.6pp） | **待检验**（旧产物不可采信；同估计器对照 Δ≈0，方向与 H1 一致） | `results/2026-11-20/e84_text_ablation/metrics.json` |
 | E3 零样本语义原型（BERT） | acc ≥ 0.50 | test acc **0.1281**、macro-F1 0.050（距离 cosine，val 选） | **未支持**（未达标） | `results/2026-11-20/e3_e4_bert/metrics.json`、`results/2026-11-20/prototypes/prototypes.json`、`emb/bert_protos.npz` |
 | E4 少样本 4 来源 × k × 5 seed（BERT） | `P_mix − P_shot ≥ 3pp @ k≤5` 且 CI 不跨零 | P_shot：k=1 **0.4481**、k=5 **0.5078**、k=10 **0.5190**、k=20 **0.5175**；P_llm 0.1281；P_rand 0.09–0.12；val 选 α*=0 → Δ = 0.0000，CI95 [0, 0] | **未支持**（语义原型对少样本无增益） | `results/2026-11-20/e3_e4_bert/metrics.json`、`curve.csv` |
@@ -157,6 +158,7 @@
 
 | 2026-11-20 | v1.6 | C-28 结果回填（新增 §5.2）：E0/E8.1/E8.2 完成；E8.4 判「待检验」（旧 no_text 检查点跨批次混淆，同估计器对照 Δ≈0）；E3 acc 0.1281 **未支持**、E4 Δ=0 **未支持**（门槛未改）；新增 `scripts/build_semantic_prototypes.py`、`scripts/eval_fewshot_prototypes.py`、`scripts/audit_modality_info.py` 的 `e84` 分支 |
 | 2026-11-20 | v1.7 | E8.3 结果回填：A0*(model_2013) 文本侧翻转 2.42% CI[1.69,3.14]、特征侧 3.38% CI[2.54,4.23]（同类 donor、20 字段对齐），门槛 <0.20 **通过**；E8 整体判「部分证实」（E8.4 旧产物仍不可采信）；C-28 状态 `待检验`→**部分证实**；新增 `scripts/e83_perturbation.py`（总纲 v1.3 G4） |
+| 2026-11-20 | v1.8 | E8.3 阳性对照（跨类 donor）回填：文本侧 66.2% CI[63.9,68.3] vs 特征侧 10.1%；修正 E8.3 判读为「门槛通过但解读需修正」——不支持「模型不读文本」，文本无额外信息仍由 E8.1/E8.2 承担；`scripts/e83_perturbation.py` 增 `--donor {same,cross}` |
 
 > 新增结论必须先定状态再写数值；状态升级（未支持 → 已证实）需要新的预注册口径与产物，
 > 并在此表追加变更行。
