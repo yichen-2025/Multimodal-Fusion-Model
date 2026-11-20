@@ -1,0 +1,67 @@
+{
+  "experiment": "E6 原型距离开集三组对照",
+  "split_dir": "split_data/dataset_200/split_openset_0",
+  "protos": "emb/qwen_protos.npy",
+  "text_source": "emb/qwen_texts.npz",
+  "metric_selected_on_val": "cosine",
+  "val_zero_shot_acc": 0.14945054945054945,
+  "k": 5,
+  "alpha": 0.5,
+  "seeds": [
+    42,
+    123,
+    2024,
+    7,
+    13
+  ],
+  "arms": {
+    "zero_shot": {
+      "auroc_genuine": 0.6138673416619036,
+      "tpr_at_fpr1_genuine": 0.0,
+      "threshold_genuine": 0.8566241193581041,
+      "auroc_simulated": 0.482768335403036,
+      "tpr_at_fpr1_simulated": 0.006134969325153374,
+      "threshold_simulated": 0.8566241193581041,
+      "n_known": 1655,
+      "n_genuine": 222,
+      "n_simulated": 163
+    },
+    "warm_start": {
+      "auroc_genuine": 0.4642878528074903,
+      "tpr_at_fpr1_genuine": 0.0,
+      "threshold_genuine": 0.46091805097532484,
+      "auroc_simulated": 0.49109410042073653,
+      "tpr_at_fpr1_simulated": 0.018404907975460124,
+      "threshold_simulated": 0.46091805097532484,
+      "n_known": 1655,
+      "n_genuine": 222,
+      "n_simulated": 163
+    },
+    "random": {
+      "auroc_genuine": 0.47875398056666935,
+      "tpr_at_fpr1_genuine": 0.0,
+      "threshold_genuine": 0.9734620512295721,
+      "auroc_simulated": 0.5478990973625192,
+      "tpr_at_fpr1_simulated": 0.006134969325153374,
+      "threshold_simulated": 0.9734620512295721,
+      "n_known": 1655,
+      "n_genuine": 222,
+      "n_simulated": 163
+    }
+  },
+  "delta_warm_minus_zero": {
+    "tpr_at_fpr1_genuine": 0.0,
+    "tpr_ci95": [
+      -0.009009009009009009,
+      0.0
+    ],
+    "auroc_genuine": -0.1495794888544133,
+    "auroc_ci95": [
+      -0.19437671810783594,
+      -0.10641136604882834
+    ]
+  },
+  "gate_pp": 0.02,
+  "boot": 4000,
+  "gate_pass": false
+}

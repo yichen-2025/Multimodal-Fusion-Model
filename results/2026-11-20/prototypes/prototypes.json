@@ -1,0 +1,105 @@
+{
+  "experiment": "类语义原型（BERT，P_llm）",
+  "split_dir": "split_data/dataset_200/split_openset_0",
+  "bert_path": "models/bert",
+  "encoder": "BertEncoder([CLS], 无池化/无归一化)；与 text_embeddings 缓存一致",
+  "n_classes": 10,
+  "n_desc_per_class": 3,
+  "class_names": [
+    "BENIGN",
+    "DoS Hulk",
+    "DoS GoldenEye",
+    "DoS slowloris",
+    "DoS Slowhttptest",
+    "DDoS",
+    "PortScan",
+    "FTP-Patator",
+    "SSH-Patator",
+    "Bot"
+  ],
+  "prototypes": {
+    "BENIGN": {
+      "kb_id": null,
+      "descriptions": [
+        "BENIGN（正常流量）：无对应攻击技术，属于合法业务访问。",
+        "正常的业务访问流量，连接持续时间与包速率处于日常范围，双向字节数基本均衡，使用常见服务端口，不存在突发的高并发或重复登录行为。",
+        "BENIGN：流统计表现为中等持续时长、较低包速率、双向字节数均衡。"
+      ]
+    },
+    "DoS Hulk": {
+      "kb_id": "T1498.001",
+      "descriptions": [
+        "DoS Hulk 类型的网络流量，对应攻击技术 T1498.001 Network Denial of Service: Direct Network Flood：攻击者以大量并发流量直接淹没目标带宽或网络设备，使合法请求无法得到响应。短时间内目标收到极高的包速率与字节速率（可达数十万包每秒），出现大量并发连接，SYN 与 ACK 比例异常，源地址分散；受害端带宽饱和、丢包率骤升。",
+        "针对 Web 服务的突发高并发请求攻击，包速率极高、并发连接数骤增，单条连接持续时间很短，目标端口为 80。",
+        "DoS Hulk：流统计表现为极短持续时长、极高包速率、单包字节数偏大。"
+      ]
+    },
+    "DoS GoldenEye": {
+      "kb_id": "T1498.001",
+      "descriptions": [
+        "DoS GoldenEye 类型的网络流量，对应攻击技术 T1498.001 Network Denial of Service: Direct Network Flood：攻击者以大量并发流量直接淹没目标带宽或网络设备，使合法请求无法得到响应。短时间内目标收到极高的包速率与字节速率（可达数十万包每秒），出现大量并发连接，SYN 与 ACK 比例异常，源地址分散；受害端带宽饱和、丢包率骤升。",
+        "HTTP 洪水攻击，多个并发连接持续请求同一目标，连接保持时间中等，包速率很高，目标端口为 80。",
+        "DoS GoldenEye：流统计表现为较短持续时长、高包速率、并发连接密集。"
+      ]
+    },
+    "DoS slowloris": {
+      "kb_id": "T1498.002",
+      "descriptions": [
+        "DoS slowloris 类型的网络流量，对应攻击技术 T1498.002 Network Denial of Service: Service Exhaustion Flood：攻击者通过长期占用服务连接与线程资源（慢速发送请求、保持半开连接）耗尽服务能力。单条连接持续时间异常长（分钟级甚至小时级），每条连接传输字节很少，存在大量半开连接或慢速 HTTP 请求头，服务连接数与响应时间同步上升。",
+        "慢速 HTTP 攻击，客户端逐字节缓慢发送请求头，连接持续时间极长，每条连接传输字节很少，大量半开连接堆积在服务端。",
+        "DoS slowloris：流统计表现为极长持续时长、极低包速率、单包字节数很小。"
+      ]
+    },
+    "DoS Slowhttptest": {
+      "kb_id": "T1498.002",
+      "descriptions": [
+        "DoS Slowhttptest 类型的网络流量，对应攻击技术 T1498.002 Network Denial of Service: Service Exhaustion Flood：攻击者通过长期占用服务连接与线程资源（慢速发送请求、保持半开连接）耗尽服务能力。单条连接持续时间异常长（分钟级甚至小时级），每条连接传输字节很少，存在大量半开连接或慢速 HTTP 请求头，服务连接数与响应时间同步上升。",
+        "慢速连接耗尽攻击，长期保持半开连接并缓慢发送数据，连接持续时间长、包数少、包速率低。",
+        "DoS Slowhttptest：流统计表现为长持续时长、低包速率、连接数多而每连接字节少。"
+      ]
+    },
+    "DDoS": {
+      "kb_id": "T1498.001",
+      "descriptions": [
+        "DDoS 类型的网络流量，对应攻击技术 T1498.001 Network Denial of Service: Direct Network Flood：攻击者以大量并发流量直接淹没目标带宽或网络设备，使合法请求无法得到响应。短时间内目标收到极高的包速率与字节速率（可达数十万包每秒），出现大量并发连接，SYN 与 ACK 比例异常，源地址分散；受害端带宽饱和、丢包率骤升。",
+        "分布式拒绝服务攻击，多源并发向同一目标发送大流量，包速率与字节速率极高，源地址高度分散，目标带宽被饱和。",
+        "DDoS：流统计表现为极短持续时长、极高包速率与字节速率、源端口分散。"
+      ]
+    },
+    "PortScan": {
+      "kb_id": "T1046",
+      "descriptions": [
+        "PortScan 类型的网络流量，对应攻击技术 T1046 Network Service Scanning：枚举目标主机开放的端口与服务，为后续攻击做侦察准备。单一源在短时间内对多个目标端口发起连接尝试，出现大量 SYN 与 RST，目标端口序列递增，单条连接持续时间极短且字节数很少。",
+        "端口扫描侦察，单一源在短时间内探测大量目标端口，单条连接持续时间极短，SYN 与 RST 报文频繁，单包字节数很少。",
+        "PortScan：流统计表现为极短持续时长、极少字节数、包速率高且目标端口连续。"
+      ]
+    },
+    "FTP-Patator": {
+      "kb_id": "T1110.001",
+      "descriptions": [
+        "FTP-Patator 类型的网络流量，对应攻击技术 T1110.001 Brute Force: Password Guessing：攻击者反复尝试常见口令登录认证服务（FTP/SSH/Telnet/Web 登录）以获取凭据。同一源对认证服务端口（TCP 21 FTP、22 SSH、23 Telnet、3389 RDP、80/443 Web 登录）发起大量短连接与重复登录失败；连接持续时间短、双向字节数小且对称，登录尝试频率高。",
+        "针对 FTP 服务的口令暴力破解，反复向 21 端口发起短连接并尝试登录，连接时长与字节数都较小。",
+        "FTP-Patator：流统计表现为短持续时长、小字节数、目标端口固定为 21。"
+      ]
+    },
+    "SSH-Patator": {
+      "kb_id": "T1110.001",
+      "descriptions": [
+        "SSH-Patator 类型的网络流量，对应攻击技术 T1110.001 Brute Force: Password Guessing：攻击者反复尝试常见口令登录认证服务（FTP/SSH/Telnet/Web 登录）以获取凭据。同一源对认证服务端口（TCP 21 FTP、22 SSH、23 Telnet、3389 RDP、80/443 Web 登录）发起大量短连接与重复登录失败；连接持续时间短、双向字节数小且对称，登录尝试频率高。",
+        "针对 SSH 服务的口令暴力破解，反复向 22 端口发起短连接并尝试登录，连接时长短、包数少。",
+        "SSH-Patator：流统计表现为短持续时长、小字节数、目标端口固定为 22。"
+      ]
+    },
+    "Bot": {
+      "kb_id": "T1071",
+      "descriptions": [
+        "Bot 类型的网络流量，对应攻击技术 T1071 Application Layer Protocol：恶意程序使用常见应用层协议（HTTP/DNS/IRC 等）作为命令与控制通道，混入正常流量。长连接长时间保持，出现固定间隔的心跳小包与周期性通信；用非常规端口承载 HTTP/DNS，常见目标端口包括 80、443、8080、6667。",
+        "受控主机与命令控制服务器之间的周期性通信，长连接保持，固定间隔的心跳小包，使用非常规端口承载应用层协议。",
+        "Bot：流统计表现为长持续时长、低包速率、周期性小包。"
+      ]
+    }
+  },
+  "proto_raw_norm_mean": 20.704689025878906,
+  "pairwise_cosine_mean": 0.9521000385284424,
+  "artifact": "emb/bert_protos.npz"
+}

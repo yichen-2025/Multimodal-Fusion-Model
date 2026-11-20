@@ -1,0 +1,387 @@
+{
+  "experiment": "E5 Qwen 空间：零样本 / 少样本语义原型",
+  "split_dir": "split_data/dataset_200/split_openset_0",
+  "protos": "emb/qwen_protos.npy",
+  "text_source": "emb/qwen_texts.npz",
+  "n_train_known": 1000,
+  "n_val_known": 910,
+  "n_test_known": 1655,
+  "e3_zero_shot": {
+    "metric_selected_on_val": "cosine",
+    "val_acc_by_metric": {
+      "cosine": 0.14945054945054945,
+      "euclidean": 0.13846153846153847
+    },
+    "val_acc": 0.14945054945054945,
+    "test_acc": 0.14622356495468278,
+    "test_macro_f1": 0.07922903846543791,
+    "gate_acc_ge_0.50": false,
+    "n_test_known": 1655,
+    "ood_descriptive": {
+      "auroc_genuine": 0.6138673416619036,
+      "tpr_at_fpr1_genuine": 0.0,
+      "auroc_simulated": 0.482768335403036,
+      "tpr_at_fpr1_simulated": 0.006134969325153374,
+      "note": "零样本 OOD 只作描述，不加阈值、不调 τ"
+    }
+  },
+  "e4_few_shot": {
+    "metric_selected_on_val": "cosine",
+    "seeds": [
+      42,
+      123,
+      2024,
+      7,
+      13
+    ],
+    "alphas": [
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "curve": [
+      {
+        "k": 0,
+        "source": "P_llm",
+        "alpha": null,
+        "seed": null,
+        "acc": 0.14622356495468278,
+        "macro_f1": 0.07922903846543791
+      },
+      {
+        "k": 0,
+        "source": "P_rand",
+        "alpha": null,
+        "seed": null,
+        "acc": 0.10332326283987915,
+        "macro_f1": 0.06560225925162788
+      },
+      {
+        "k": 1,
+        "source": "P_mix",
+        "alpha": 0.0,
+        "seed": null,
+        "acc": 0.1782477341389728,
+        "macro_f1": null
+      },
+      {
+        "k": 1,
+        "source": "P_mix",
+        "alpha": 0.25,
+        "seed": null,
+        "acc": 0.17123867069486404,
+        "macro_f1": null
+      },
+      {
+        "k": 1,
+        "source": "P_mix",
+        "alpha": 0.5,
+        "seed": null,
+        "acc": 0.17293051359516615,
+        "macro_f1": null
+      },
+      {
+        "k": 1,
+        "source": "P_mix",
+        "alpha": 0.75,
+        "seed": null,
+        "acc": 0.18259818731117822,
+        "macro_f1": null
+      },
+      {
+        "k": 1,
+        "source": "P_mix",
+        "alpha": 1.0,
+        "seed": null,
+        "acc": 0.14622356495468278,
+        "macro_f1": null
+      },
+      {
+        "k": 1,
+        "source": "P_shot",
+        "alpha": null,
+        "seed": null,
+        "acc": 0.1782477341389728,
+        "macro_f1": null
+      },
+      {
+        "k": 1,
+        "source": "P_rand",
+        "alpha": null,
+        "seed": null,
+        "acc": 0.10972809667673715,
+        "macro_f1": null
+      },
+      {
+        "k": 1,
+        "source": "P_mix",
+        "alpha": 0.75,
+        "seed": null,
+        "acc": 0.18259818731117822,
+        "macro_f1": null,
+        "selected_on_val": true,
+        "val_acc_mean": 0.1923076923076923,
+        "val_alpha_curve": {
+          "0.0": 0.18527472527472527,
+          "0.25": 0.17714285714285716,
+          "0.5": 0.18637362637362637,
+          "0.75": 0.1923076923076923,
+          "1.0": 0.14945054945054945
+        },
+        "delta_vs_shot": 0.004350453172205437,
+        "delta_bootstrap_ci95": [
+          -0.006407854984894262,
+          0.014867069486404816
+        ]
+      },
+      {
+        "k": 5,
+        "source": "P_mix",
+        "alpha": 0.0,
+        "seed": null,
+        "acc": 0.1861027190332326,
+        "macro_f1": null
+      },
+      {
+        "k": 5,
+        "source": "P_mix",
+        "alpha": 0.25,
+        "seed": null,
+        "acc": 0.18731117824773413,
+        "macro_f1": null
+      },
+      {
+        "k": 5,
+        "source": "P_mix",
+        "alpha": 0.5,
+        "seed": null,
+        "acc": 0.18658610271903323,
+        "macro_f1": null
+      },
+      {
+        "k": 5,
+        "source": "P_mix",
+        "alpha": 0.75,
+        "seed": null,
+        "acc": 0.17172205438066465,
+        "macro_f1": null
+      },
+      {
+        "k": 5,
+        "source": "P_mix",
+        "alpha": 1.0,
+        "seed": null,
+        "acc": 0.14622356495468278,
+        "macro_f1": null
+      },
+      {
+        "k": 5,
+        "source": "P_shot",
+        "alpha": null,
+        "seed": null,
+        "acc": 0.1861027190332326,
+        "macro_f1": null
+      },
+      {
+        "k": 5,
+        "source": "P_rand",
+        "alpha": null,
+        "seed": null,
+        "acc": 0.09897280966767372,
+        "macro_f1": null
+      },
+      {
+        "k": 5,
+        "source": "P_mix",
+        "alpha": 0.25,
+        "seed": null,
+        "acc": 0.18731117824773413,
+        "macro_f1": null,
+        "selected_on_val": true,
+        "val_acc_mean": 0.19626373626373628,
+        "val_alpha_curve": {
+          "0.0": 0.1912087912087912,
+          "0.25": 0.19626373626373628,
+          "0.5": 0.19318681318681316,
+          "0.75": 0.1813186813186813,
+          "1.0": 0.14945054945054945
+        },
+        "delta_vs_shot": 0.0012084592145015106,
+        "delta_bootstrap_ci95": [
+          -0.003262839879154079,
+          0.005320241691842886
+        ]
+      },
+      {
+        "k": 10,
+        "source": "P_mix",
+        "alpha": 0.0,
+        "seed": null,
+        "acc": 0.22682779456193355,
+        "macro_f1": null
+      },
+      {
+        "k": 10,
+        "source": "P_mix",
+        "alpha": 0.25,
+        "seed": null,
+        "acc": 0.22078549848942597,
+        "macro_f1": null
+      },
+      {
+        "k": 10,
+        "source": "P_mix",
+        "alpha": 0.5,
+        "seed": null,
+        "acc": 0.2147432024169184,
+        "macro_f1": null
+      },
+      {
+        "k": 10,
+        "source": "P_mix",
+        "alpha": 0.75,
+        "seed": null,
+        "acc": 0.19613293051359518,
+        "macro_f1": null
+      },
+      {
+        "k": 10,
+        "source": "P_mix",
+        "alpha": 1.0,
+        "seed": null,
+        "acc": 0.14622356495468278,
+        "macro_f1": null
+      },
+      {
+        "k": 10,
+        "source": "P_shot",
+        "alpha": null,
+        "seed": null,
+        "acc": 0.22682779456193355,
+        "macro_f1": null
+      },
+      {
+        "k": 10,
+        "source": "P_rand",
+        "alpha": null,
+        "seed": null,
+        "acc": 0.0861631419939577,
+        "macro_f1": null
+      },
+      {
+        "k": 10,
+        "source": "P_mix",
+        "alpha": 0.0,
+        "seed": null,
+        "acc": 0.22682779456193355,
+        "macro_f1": null,
+        "selected_on_val": true,
+        "val_acc_mean": 0.23824175824175825,
+        "val_alpha_curve": {
+          "0.0": 0.23824175824175825,
+          "0.25": 0.22637362637362637,
+          "0.5": 0.2268131868131868,
+          "0.75": 0.20549450549450549,
+          "1.0": 0.14945054945054945
+        },
+        "delta_vs_shot": 0.0,
+        "delta_bootstrap_ci95": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "k": 20,
+        "source": "P_mix",
+        "alpha": 0.0,
+        "seed": null,
+        "acc": 0.2328700906344411,
+        "macro_f1": null
+      },
+      {
+        "k": 20,
+        "source": "P_mix",
+        "alpha": 0.25,
+        "seed": null,
+        "acc": 0.22864048338368584,
+        "macro_f1": null
+      },
+      {
+        "k": 20,
+        "source": "P_mix",
+        "alpha": 0.5,
+        "seed": null,
+        "acc": 0.21764350453172207,
+        "macro_f1": null
+      },
+      {
+        "k": 20,
+        "source": "P_mix",
+        "alpha": 0.75,
+        "seed": null,
+        "acc": 0.1940785498489426,
+        "macro_f1": null
+      },
+      {
+        "k": 20,
+        "source": "P_mix",
+        "alpha": 1.0,
+        "seed": null,
+        "acc": 0.14622356495468278,
+        "macro_f1": null
+      },
+      {
+        "k": 20,
+        "source": "P_shot",
+        "alpha": null,
+        "seed": null,
+        "acc": 0.2328700906344411,
+        "macro_f1": null
+      },
+      {
+        "k": 20,
+        "source": "P_rand",
+        "alpha": null,
+        "seed": null,
+        "acc": 0.09631419939577039,
+        "macro_f1": null
+      },
+      {
+        "k": 20,
+        "source": "P_mix",
+        "alpha": 0.0,
+        "seed": null,
+        "acc": 0.2328700906344411,
+        "macro_f1": null,
+        "selected_on_val": true,
+        "val_acc_mean": 0.24263736263736266,
+        "val_alpha_curve": {
+          "0.0": 0.24263736263736266,
+          "0.25": 0.23010989010989014,
+          "0.5": 0.22219780219780222,
+          "0.75": 0.2081318681318681,
+          "1.0": 0.14945054945054945
+        },
+        "delta_vs_shot": 0.0,
+        "delta_bootstrap_ci95": [
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "gate_delta_ge_0.03_at_k_le_5": false,
+    "gate_note": "达标需 Δ>=3pp 且 bootstrap 95% CI 下界 > 0",
+    "gate_check_k": 1,
+    "gate_delta": 0.004350453172205437,
+    "gate_ci95": [
+      -0.006407854984894262,
+      0.014867069486404816
+    ]
+  },
+  "thresholds": {
+    "E3_acc_ge": 0.5,
+    "E4_delta_ge": 0.03
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "experiment": "E7 原型构造消融（零样本）",
+  "backend": "qwen",
+  "n_test_known": 1655,
+  "class_names": [
+    "BENIGN",
+    "DoS Hulk",
+    "DoS GoldenEye",
+    "DoS slowloris",
+    "DoS Slowhttptest",
+    "DDoS",
+    "PortScan",
+    "FTP-Patator",
+    "SSH-Patator",
+    "Bot"
+  ],
+  "table": [
+    {
+      "subset": "d1",
+      "n_desc": 1,
+      "n_proto": 1,
+      "metric": "cosine",
+      "test_acc": 0.13413897280966766
+    },
+    {
+      "subset": "d1",
+      "n_desc": 1,
+      "n_proto": 1,
+      "metric": "euclidean",
+      "test_acc": 0.1027190332326284
+    },
+    {
+      "subset": "d1+d2",
+      "n_desc": 2,
+      "n_proto": 1,
+      "metric": "cosine",
+      "test_acc": 0.13413897280966766
+    },
+    {
+      "subset": "d1+d2",
+      "n_desc": 2,
+      "n_proto": 1,
+      "metric": "euclidean",
+      "test_acc": 0.1027190332326284
+    },
+    {
+      "subset": "d1+d2",
+      "n_desc": 2,
+      "n_proto": 2,
+      "metric": "cosine",
+      "test_acc": 0.1419939577039275
+    },
+    {
+      "subset": "d1+d2",
+      "n_desc": 2,
+      "n_proto": 2,
+      "metric": "euclidean",
+      "test_acc": 0.13353474320241693
+    },
+    {
+      "subset": "all",
+      "n_desc": 3,
+      "n_proto": 1,
+      "metric": "cosine",
+      "test_acc": 0.13413897280966766
+    },
+    {
+      "subset": "all",
+      "n_desc": 3,
+      "n_proto": 1,
+      "metric": "euclidean",
+      "test_acc": 0.1027190332326284
+    },
+    {
+      "subset": "all",
+      "n_desc": 3,
+      "n_proto": 2,
+      "metric": "cosine",
+      "test_acc": 0.1419939577039275
+    },
+    {
+      "subset": "all",
+      "n_desc": 3,
+      "n_proto": 2,
+      "metric": "euclidean",
+      "test_acc": 0.13353474320241693
+    },
+    {
+      "subset": "all",
+      "n_desc": 3,
+      "n_proto": 3,
+      "metric": "cosine",
+      "test_acc": 0.14622356495468278
+    },
+    {
+      "subset": "all",
+      "n_desc": 3,
+      "n_proto": 3,
+      "metric": "euclidean",
+      "test_acc": 0.13534743202416918
+    }
+  ],
+  "note": "α 的影响见 E4/E5 的 curve.csv；本表不含 α"
+}
