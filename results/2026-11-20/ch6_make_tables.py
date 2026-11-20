@@ -86,7 +86,8 @@ for name, d, enc, dim in (("E3", e3, "BERT-base (110M)", 768),
             f"**{z['test_acc']:.4f}** | {z['test_macro_f1']:.4f} | {o['auroc_genuine']:.4f} | "
             f"{o['tpr_at_fpr1_genuine']:.4f} |\n")
 t61 += ("\n> 门槛 test acc ≥ 0.50（表 6-5）。三档编码器均在 0.11–0.15，距门槛 35pp 以上；"
-        "AUROC 随规模单调下降（0.741 → 0.614 → 0.477），`tpr@fpr=1%` 三档全为 0。\n\n")
+        "开集 AUROC 为 0.259 → 0.386 → 0.523（均接近随机水平，7B 略高于 0.5），"
+        "`tpr@fpr=1%` 三档全为 0。\n\n")
 
 
 # ---- 表 6-2 少样本 ----
@@ -155,7 +156,9 @@ t63 += (f"\n> Δ（热启动 − 零样本）：BERT-base {dlt(e6b)}；Qwen2.5-1
         "门槛为 `tpr@fpr=1%` +2pp 且 CI 不跨零，两者均未达标。"
         f"注意 BERT 的随机原型 `tpr@fpr=1%`（{e6b['arms']['random']['tpr_at_fpr1_genuine'] * 100:.2f}%）"
         f"高于语义热启动（{e6b['arms']['warm_start']['tpr_at_fpr1_genuine'] * 100:.2f}%），"
-        "说明不同原型集合的距离尺度不可直接比较，跨臂读 tpr 需先校准。\n\n")
+        f"随机臂 AUROC（BERT {e6b['arms']['random']['auroc_genuine']:.3f} / "
+        f"Qwen {e6q['arms']['random']['auroc_genuine']:.3f}）也高于语义臂；"
+        "说明不同原型集合的距离尺度不可直接比较，跨臂读 tpr/AUROC 需先校准。\n\n")
 
 
 # ---- 表 6-4 原型构造消融 ----
@@ -208,10 +211,10 @@ t0 = f"""# 第 6 章 · 语义先验：章首对照表与判定汇总
 | E5 少样本（Qwen1.5B） | 同 E4 | 最大 {rows[1]["mix"] * 100:+.2f}pp（k={rows[1]["mk"]}, α={rows[1]["alpha"]}）CI[{rows[1]["mci"][0] * 100:+.2f}, {rows[1]["mci"][1] * 100:+.2f}]pp | **未达标** |
 | E9 少样本（Qwen7B） | 同 E4 | 最大 {rows[2]["mix"] * 100:+.2f}pp（k={rows[2]["mk"]}, α={rows[2]["alpha"]}）CI[{rows[2]["mci"][0] * 100:+.2f}, {rows[2]["mci"][1] * 100:+.2f}]pp | **未达标** |
 | E6 开集三臂（BERT） | `tpr@fpr=1%` 热启动 − 零样本 ≥ 2pp 且 CI 不跨零 | {e6b["arms"]["zero_shot"]["tpr_at_fpr1_genuine"]:.4f} → {e6b["arms"]["warm_start"]["tpr_at_fpr1_genuine"]:.4f}（+{(e6b["arms"]["warm_start"]["tpr_at_fpr1_genuine"] - e6b["arms"]["zero_shot"]["tpr_at_fpr1_genuine"]) * 100:.2f}pp） | **未达标** |
-| E6 开集三臂（Qwen1.5B） | 同上 | AUROC {e6q["arms"]["zero_shot"]["auroc_genuine"]:.4f} → {e6q["arms"]["warm_start"]["auroc_genuine"]:.4f}（热启动更差） | **未达标** |
+| E6 开集三臂（Qwen1.5B） | 同上 | AUROC {e6q["arms"]["zero_shot"]["auroc_genuine"]:.4f} → {e6q["arms"]["warm_start"]["auroc_genuine"]:.4f}（热启动更好，但 `tpr@fpr=1%` 均为 0） | **未达标** |
 | E7 原型构造消融 | 描述性（无门槛） | 描述来源/原型条数/距离全组合均在随机水平附近 | **描述不是瓶颈** |
 | E8.4 去文本消融（C-30 重训） | 5 seed bootstrap CI 下界 > −1pp → 文本可省 | 5 seeds `A0*_no_text` {e84["acc_no_text_mean"]:.4f} ± {e84["acc_no_text_sd"]:.4f}，A0\\* 基准 {e84["baseline"]["acc"]:.4f} → Δ = **{e84["delta_pp"]:+.2f}pp** CI[{e84["delta_ci95_pp"][0]:+.2f}, {e84["delta_ci95_pp"][1]:+.2f}] | **未通过**（不能声称文本可省） |
-| E9 容量阶梯 | `tpr@fpr=1%` 较 BERT +2pp 且 CI 不跨零 | 0.0000 vs 0.0000（Δtpr=0）；AUROC 0.741→0.614→0.477 | **未达标（容量无效）** |
+| E9 容量阶梯 | `tpr@fpr=1%` 较 BERT +2pp 且 CI 不跨零 | 0.0000 vs 0.0000（Δtpr=0）；AUROC 0.259→0.386→0.523（仍接近随机） | **未达标（容量无效）** |
 
 **汇总**：语义先验路线（E3–E9）在三个编码器、五种原型来源、全部构造组合下均未达门槛；E8.4 已按 C-30 判「未通过」，且与 LLM 容量混叠，只能得出「不能声称文本可省」，不得反推「文本携带独立信息」。**本轮无「待检验」项。**
 """

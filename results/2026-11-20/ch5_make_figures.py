@@ -131,7 +131,7 @@ axes[0].text(0.02, 0.085, "chance", fontsize=7, color=GRAY, ha="left", va="top")
 axes[0].set_ylabel("Zero-shot closed-set accuracy")
 axes[1].plot(sizes, auc, "o-", color=RED, lw=1.4)
 axes[1].axhline(0.5, color=GRAY, ls=":", lw=1)
-axes[1].set_ylim(0.4, 0.8)
+axes[1].set_ylim(0.2, 0.65)
 axes[1].text(0.02, 0.485, "chance", fontsize=7, color=GRAY, ha="left", va="top")
 axes[1].set_ylabel("Open-set AUROC")
 for ax in axes:
@@ -188,7 +188,7 @@ md = f"""# 第 5 章 · 机制诊断：数字表与图注
 | Qwen2.5-1.5B | 1536 | {acc[1]:.4f} | {auc[1]:.4f} | {tpr[1]:.4f} |
 | Qwen2.5-7B | 3584 | {acc[2]:.4f} | {auc[2]:.4f} | {tpr[2]:.4f} |
 
-图 4（`fig4_capacity.png`）：规模从 110M 增加到 7B，零样本精度未改善，开集 AUROC 单调下降。容量不是瓶颈，信息量才是。
+图 4（`fig4_capacity.png`）：规模从 110M 增加到 7B，零样本精度未改善，开集 AUROC 仍在 0.26–0.52 之间（接近随机水平）。容量不是瓶颈，信息量才是。
 
 ## 未出图项
 

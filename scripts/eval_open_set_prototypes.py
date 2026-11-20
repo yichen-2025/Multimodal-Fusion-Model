@@ -91,7 +91,7 @@ def arm_metrics(sc_all, yte, ote, kte):
             out[f"auroc_{tag}"] = None
             out[f"tpr_at_fpr1_{tag}"] = None
             continue
-        y = np.r_[np.ones(len(known)), np.zeros(len(unk))]
+        y = np.r_[np.zeros(len(known)), np.ones(len(unk))]
         s = np.r_[known, unk]
         out[f"auroc_{tag}"] = float(roc_auc_score(y, s))
         out[f"tpr_at_fpr1_{tag}"], out[f"threshold_{tag}"] = tpr_at_fpr1(known, unk)
@@ -175,7 +175,7 @@ def main():
         thr_z = np.quantile(sc_zero[bk], 0.99)
         thr_w = np.quantile(sc_warm[bk], 0.99)
         diffs.append(float((sc_warm[bu] > thr_w).mean() - (sc_zero[bu] > thr_z).mean()))
-        yk = np.ones(len(bk)); yu = np.zeros(len(bu))
+        yk = np.zeros(len(bk)); yu = np.ones(len(bu))
         diffs_a.append(float(roc_auc_score(np.r_[yk, yu], np.r_[sc_warm[bk], sc_warm[bu]])
                              - roc_auc_score(np.r_[yk, yu], np.r_[sc_zero[bk], sc_zero[bu]])))
     ci_tpr = [float(np.quantile(diffs, 0.025)), float(np.quantile(diffs, 0.975))]

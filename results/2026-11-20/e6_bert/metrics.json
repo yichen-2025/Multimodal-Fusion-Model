@@ -16,10 +16,10 @@
   ],
   "arms": {
     "zero_shot": {
-      "auroc_genuine": 0.7407011240848098,
+      "auroc_genuine": 0.25929887591519013,
       "tpr_at_fpr1_genuine": 0.0,
       "threshold_genuine": 0.19893391799010668,
-      "auroc_simulated": 0.5248327247789744,
+      "auroc_simulated": 0.47516727522102575,
       "tpr_at_fpr1_simulated": 0.03067484662576687,
       "threshold_simulated": 0.19893391799010668,
       "n_known": 1655,
@@ -27,10 +27,10 @@
       "n_simulated": 163
     },
     "warm_start": {
-      "auroc_genuine": 0.7584197490541902,
+      "auroc_genuine": 0.24158025094580987,
       "tpr_at_fpr1_genuine": 0.0045045045045045045,
       "threshold_genuine": 0.05753271788956708,
-      "auroc_simulated": 0.5217856282319797,
+      "auroc_simulated": 0.47821437176802034,
       "tpr_at_fpr1_simulated": 0.0,
       "threshold_simulated": 0.05753271788956708,
       "n_known": 1655,
@@ -38,10 +38,10 @@
       "n_simulated": 163
     },
     "random": {
-      "auroc_genuine": 0.3444244849078686,
+      "auroc_genuine": 0.6555755150921314,
       "tpr_at_fpr1_genuine": 0.036036036036036036,
       "threshold_genuine": 0.9449742887890231,
-      "auroc_simulated": 0.4863028932589476,
+      "auroc_simulated": 0.5136971067410524,
       "tpr_at_fpr1_simulated": 0.0,
       "threshold_simulated": 0.9449742887890231,
       "n_known": 1655,
@@ -55,10 +55,10 @@
       0.0,
       0.013513513513513514
     ],
-    "auroc_genuine": 0.01771862496938037,
+    "auroc_genuine": -0.01771862496938026,
     "auroc_ci95": [
-      0.0034827576821535177,
-      0.031139598813314743
+      -0.031139598813314823,
+      -0.003482757682153399
     ]
   },
   "gate_pp": 0.02,

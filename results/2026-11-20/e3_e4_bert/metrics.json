@@ -2,6 +2,7 @@
   "experiment": "E3/E4 BERT 语义原型（零样本 / 少样本）",
   "split_dir": "split_data/dataset_200/split_openset_0",
   "protos": "emb/bert_protos.npz",
+  "text_source": "split npz text_embeddings (BERT, 768)",
   "n_train_known": 6362,
   "n_val_known": 910,
   "n_test_known": 1655,
@@ -17,9 +18,9 @@
     "gate_acc_ge_0.50": false,
     "n_test_known": 1655,
     "ood_descriptive": {
-      "auroc_genuine": 0.7407011240848098,
+      "auroc_genuine": 0.25929887591519013,
       "tpr_at_fpr1_genuine": 0.0,
-      "auroc_simulated": 0.5248327247789744,
+      "auroc_simulated": 0.47516727522102575,
       "tpr_at_fpr1_simulated": 0.03067484662576687,
       "note": "零样本 OOD 只作描述，不加阈值、不调 τ"
     }

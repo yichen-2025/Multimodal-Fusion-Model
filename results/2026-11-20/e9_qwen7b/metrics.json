@@ -18,9 +18,9 @@
     "gate_acc_ge_0.50": false,
     "n_test_known": 1655,
     "ood_descriptive": {
-      "auroc_genuine": 0.476715386080945,
+      "auroc_genuine": 0.523284613919055,
       "tpr_at_fpr1_genuine": 0.0,
-      "auroc_simulated": 0.49350916538468664,
+      "auroc_simulated": 0.5064908346153134,
       "tpr_at_fpr1_simulated": 0.006134969325153374,
       "note": "零样本 OOD 只作描述，不加阈值、不调 τ"
     }

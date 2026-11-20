@@ -161,11 +161,11 @@ def main():
     simulated = (yte == NUM_KNOWN) & (ote == 2)
     e3["ood_descriptive"] = {
         "auroc_genuine": float(roc_auc_score(
-            np.r_[np.ones(len(known_sc)), np.zeros(int(genuine.sum()))],
+            np.r_[np.zeros(len(known_sc)), np.ones(int(genuine.sum()))],
             np.r_[known_sc, d_all[genuine]])) if genuine.any() else None,
         "tpr_at_fpr1_genuine": tpr_at_fpr1(known_sc, d_all[genuine]) if genuine.any() else None,
         "auroc_simulated": float(roc_auc_score(
-            np.r_[np.ones(len(known_sc)), np.zeros(int(simulated.sum()))],
+            np.r_[np.zeros(len(known_sc)), np.ones(int(simulated.sum()))],
             np.r_[known_sc, d_all[simulated]])) if simulated.any() else None,
         "tpr_at_fpr1_simulated": tpr_at_fpr1(known_sc, d_all[simulated]) if simulated.any() else None,
         "note": "零样本 OOD 只作描述，不加阈值、不调 τ",
