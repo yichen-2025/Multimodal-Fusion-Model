@@ -1,0 +1,62 @@
+{
+  "experiment": "E8 检查1 确定性复核",
+  "split_dir": "split_data/dataset_200/split_openset_0",
+  "protocol": "text == generate_text_description(row)，逐条字符串精确比对（20 字段，:.4g）",
+  "splits": [
+    {
+      "split": "train",
+      "path": "split_data/dataset_200/split_openset_0/train_data.csv",
+      "n_rows": 6362,
+      "n_exact_match": 6362,
+      "match_rate": 1.0,
+      "n_mismatch": 0,
+      "mismatch_examples": [],
+      "n_distinct_text": 5643,
+      "n_distinct_field_tuple": 6357,
+      "text_is_injective": false,
+      "text_collision_rate": 0.1130147752279157,
+      "n_illegal_token": 0
+    },
+    {
+      "split": "val",
+      "path": "split_data/dataset_200/split_openset_0/val_data.csv",
+      "n_rows": 960,
+      "n_exact_match": 960,
+      "match_rate": 1.0,
+      "n_mismatch": 0,
+      "mismatch_examples": [],
+      "n_distinct_text": 892,
+      "n_distinct_field_tuple": 959,
+      "text_is_injective": false,
+      "text_collision_rate": 0.0708333333333333,
+      "n_illegal_token": 0
+    },
+    {
+      "split": "test",
+      "path": "split_data/dataset_200/split_openset_0/test_data.csv",
+      "n_rows": 2040,
+      "n_exact_match": 2040,
+      "match_rate": 1.0,
+      "n_mismatch": 0,
+      "mismatch_examples": [],
+      "n_distinct_text": 1872,
+      "n_distinct_field_tuple": 2040,
+      "text_is_injective": false,
+      "text_collision_rate": 0.08235294117647063,
+      "n_illegal_token": 0
+    }
+  ],
+  "summary": {
+    "n_rows_total": 9362,
+    "n_exact_match_total": 9362,
+    "match_rate_overall": 1.0,
+    "all_injective": false,
+    "n_illegal_token_total": 0
+  },
+  "conclusion_rule": "match_rate == 1.0 → 文本严格等于 20 字段的确定性函数（构造性冗余）；text_is_injective == False → 该函数为有损映射（:.4g 精度），文本信息量严格少于 20 字段。两者同时成立时，R≈0 是数据构造的直接后果，论文须按「本构造下」表述，并补 R>0 正例做刻度校准。",
+  "interpretation": "文本由 20 个数值字段按固定模板生成，因此「文本不含特征之外的标签信息」在很大程度上是数据构造的直接后果，不能外推为「LLM 文本本身无信息」。此外文本按 :.4g 格式化，是**有损**编码：多条 20 字段取值不同的样本会塌缩成同一文本，文本侧可辨信息严格少于数值侧。要获得判别力，必须补 R>0 正例（全 79 字段文本）作刻度校准。",
+  "gate": {
+    "determinism_match_rate_eq": 1.0,
+    "pass": true
+  }
+}

@@ -3,8 +3,9 @@
   "split_dir": "split_data/dataset_200/split_openset_0",
   "model_dir": "saved_models/model_2013",
   "protocol": {
-    "target": "TEXT_FEATURES 20 字段（同类别真实样本替换）",
-    "text_perturb": "重生成文本模板，数值来自同 label donor",
+    "donor": "same",
+    "target": "TEXT_FEATURES 20 字段（真实样本替换）",
+    "text_perturb": "重生成文本模板，数值来自 donor（same）",
     "feature_perturb": "仅替换同 20 字段对应的数值特征，文本不动",
     "n_known": 1655
   },
@@ -25,7 +26,9 @@
   ],
   "flip_both": 0.002416918429003021,
   "flip_neither": 0.9444108761329305,
+  "role": "main_protocol",
   "gate": {
+    "applicable": true,
     "text_flip_lt": 0.2,
     "pass": true
   },

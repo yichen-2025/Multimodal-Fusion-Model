@@ -26,9 +26,10 @@
   ],
   "flip_both": 0.05981873111782477,
   "flip_neither": 0.2972809667673716,
+  "role": "positive_control",
   "gate": {
-    "text_flip_lt": 0.2,
-    "pass": false
+    "applicable": false,
+    "reason": "阳性对照（跨类 donor）为描述性证据，不套判读门槛；pass 字段不适用于该 run"
   },
   "seed": 42,
   "batch_size": 8

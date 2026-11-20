@@ -1,11 +1,19 @@
 """E8.3：文本扰动审计 —— 模型是否真的「读文本」。
 
-协议（2026-11-20 确认）：
-  1. 扰动对象 = 文本分支出现的 20 个字段（TEXT_FEATURES），取值来自**同类别另一条真实样本**（同类替换）；
-     句式模板不动，由 generate_text_description 重新生成，因此只变数字、不变结构。
+两种角色（2026-11-20 增补）：
+  - --donor same   主协议（判读用）。门槛（C-28）：文本侧翻转率 < 0.20。
+  - --donor cross  阳性对照（描述性，**不套门槛**）。用于证明扰动装置本身有检验力：
+                   若连「文本内容整体换成另一类」都翻不动，则同类协议的 2.42%
+                   不具备任何证据力。该 run 的 gate 标记为 applicable=False。
+
+协议：
+  1. 扰动对象 = 文本分支出现的 20 个字段（TEXT_FEATURES），取值来自 donor 样本
+     （same=同类别真实样本 / cross=跨类别样本）；句式模板不动，由
+     generate_text_description 重新生成，因此只变数字、不变结构。
   2. 对照 = 只改这 20 个字段对应的**数值特征**（文本保持原样），扰动强度完全对齐。
-  3. 指标 = 相对原始预测的翻转率；门槛（C-28）：文本侧 < 0.20。
-     解释：文本侧低 + 特征侧高 → 模型靠数值特征（支持 H1/H3）；两侧都高 → 模型确实读文本。
+  3. 指标 = 相对原始预测的翻转率。
+     判读：同类文本侧低 + 跨类文本侧显著高于特征侧 → 文本分支确实在读内容，
+     但同类内扰动不足以改变判定；**仅凭同类低翻转率不得推出「模型不读文本」**。
 
 用法：
   python scripts/e83_perturbation.py \
@@ -145,7 +153,15 @@ def main():
         "feature_minus_text_ci95": [float(np.quantile(boot_d, 0.025)), float(np.quantile(boot_d, 0.975))],
         "flip_both": float((flip_t & flip_f).mean()),
         "flip_neither": float((~flip_t & ~flip_f).mean()),
-        "gate": {"text_flip_lt": GATE_FLIP, "pass": bool(flip_t.mean() < GATE_FLIP)},
+        "role": "main_protocol" if args.donor == "same" else "positive_control",
+        "gate": (
+            {"applicable": True, "text_flip_lt": GATE_FLIP,
+             "pass": bool(flip_t.mean() < GATE_FLIP)}
+            if args.donor == "same"
+            else {"applicable": False,
+                  "reason": "阳性对照（跨类 donor）为描述性证据，不套判读门槛；"
+                            "pass 字段不适用于该 run"}
+        ),
         "seed": args.seed, "batch_size": args.batch_size,
     }
     os.makedirs(args.out, exist_ok=True)

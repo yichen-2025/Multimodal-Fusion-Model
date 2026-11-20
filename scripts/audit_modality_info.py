@@ -243,6 +243,14 @@ def e84_text_ablation(args, rng):
 
     return {
         "status": "ok",
+        # —— 可采信性标记（机器可读，2026-11-20 增补）——
+        # 本分支的 Δ 来自 2026-09/10 旧批次检查点，跨批次混淆；
+        # 任何汇总脚本/LLM 都不得把它当作「文本贡献」的证据。
+        "trustworthy": False,
+        "usable_for_claim": False,
+        "verdict": "待检验",
+        "superseded_by": ("results/2026-11-19/e8_audit_hgb/metrics.json"
+                          "（同估计器对照 acc_features vs acc_features_plus_text，Δ≈0）"),
         "comparison": "A0*（数值+LLM文本，full） vs A0*_no_text（纯数值）",
         "metric": "test 已知类（1655 条）闭集准确率；路由到 unknown 计为错",
         "pairs": table,

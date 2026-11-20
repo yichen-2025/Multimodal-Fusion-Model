@@ -3,6 +3,10 @@
   "split_dir": "split_data/dataset_200/split_openset_0",
   "e84_text_ablation": {
     "status": "ok",
+    "trustworthy": false,
+    "usable_for_claim": false,
+    "verdict": "待检验",
+    "superseded_by": "results/2026-11-19/e8_audit_hgb/metrics.json（同估计器对照 acc_features vs acc_features_plus_text，Δ≈0）",
     "comparison": "A0*（数值+LLM文本，full） vs A0*_no_text（纯数值）",
     "metric": "test 已知类（1655 条）闭集准确率；路由到 unknown 计为错",
     "pairs": [
