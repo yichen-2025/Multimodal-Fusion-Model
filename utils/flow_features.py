@@ -109,6 +109,41 @@ def generate_text_description(row):
     return "。".join(parts) + "。"
 
 
+_B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def _b36(n):
+    """字段序号 → base36 短键（0→'0'，35→'z'，36→'10'）。"""
+    s = ""
+    while True:
+        s = _B36[n % 36] + s
+        n //= 36
+        if n == 0:
+            return s
+
+
+def generate_compact_text(row, fields, value_format=".6g"):
+    """位置键紧凑模板：'0=1.06e+07 1=8 2=5 …'（E10 全字段覆盖用）。
+
+    键取字段在 `fields` 中的序号（base36），不写字段全名：实测全名或 4 字符缩写
+    都会让 79 字段文本 100% 超过 512 token，位置键可压到 p99=413。
+    既有 `generate_text_description` 的 20 字段模板保持不变。
+    """
+    parts = []
+    for i, col in enumerate(fields):
+        v = row.get(col)
+        if v is None:
+            continue
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            continue
+        if np.isnan(fv):
+            continue
+        parts.append(f"{_b36(i)}={fv:{value_format}}")
+    return " ".join(parts)
+
+
 def find_illegal_text(text_series):
     """返回含非法标记（label/origin 提示词）的布尔掩码。"""
     mask = pd.Series(False, index=text_series.index)

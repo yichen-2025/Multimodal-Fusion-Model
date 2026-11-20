@@ -1,0 +1,62 @@
+{
+  "experiment": "E8 模态信息审计",
+  "split_dir": "split_data/dataset_200/split_openset_0_pos59",
+  "n_train": 6362,
+  "n_val": 910,
+  "n_test": 1655,
+  "dims": {
+    "features": 20,
+    "text": 768
+  },
+  "e81_predictability": {
+    "features_to_text": {
+      "alpha": 0.1,
+      "val_r2_variance_weighted": 0.5704065697588929,
+      "test": {
+        "r2_mean_per_dim": 0.4547094928482857,
+        "r2_median_per_dim": 0.4670541812902318,
+        "r2_variance_weighted": 0.5305825327987934,
+        "r2_min_dim": -0.23736649135977106,
+        "r2_max_dim": 0.7478214531829718,
+        "n_dims_above_0.8": 0,
+        "n_dims": 768
+      },
+      "train_r2_variance_weighted": 0.5719382038914493
+    },
+    "text_to_features": {
+      "alpha": 0.1,
+      "val_r2_variance_weighted": 0.7884737315846551,
+      "test": {
+        "r2_mean_per_dim": 0.7042988489324724,
+        "r2_median_per_dim": 0.8933975463646158,
+        "r2_variance_weighted": 0.5570939817183004,
+        "r2_min_dim": 0.038191196987855336,
+        "r2_max_dim": 0.9635939824154939,
+        "n_dims_above_0.8": 13,
+        "n_dims": 20
+      },
+      "train_r2_variance_weighted": 0.8755909154821244
+    },
+    "conclusion_rule": "79->768 的 test R² 越高 → 文本越冗余（H1 成立）"
+  },
+  "e82_conditional_mi": {
+    "entropy_y_test_nats": 2.3019221878883322,
+    "ce_features": 0.3667224492681209,
+    "ce_text": 0.05338460267158149,
+    "ce_features_plus_text": 0.04240863655253429,
+    "acc_features": 0.9045317220543807,
+    "acc_text": 0.9891238670694864,
+    "acc_features_plus_text": 0.9903323262839879,
+    "I_text_y_nats": 2.248537585216751,
+    "I_features_y_nats": 1.9351997386202113,
+    "I_text_y_given_features_nats": 0.3243138127155866,
+    "I_text_y_given_features_bootstrap_ci95": [
+      0.26518235257692,
+      0.3867395911243633
+    ],
+    "boot": 500,
+    "estimator_kind": "logreg",
+    "estimator": "CE difference of logreg classifier (plug-in), bootstrap resamples test rows only (no refit)",
+    "conclusion_rule": "I(text;y|features) ≈ 0（CI 覆盖 0 且上界很小）→ 文本无独立信息"
+  }
+}

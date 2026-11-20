@@ -54,7 +54,7 @@ class BertEncoder(nn.Module):
             param.requires_grad = False
 
     @torch.no_grad()
-    def forward(self, text_descriptions):
+    def forward(self, text_descriptions, max_length=None):
         """
         前向传播：将文本描述转换为BERT语义特征（分批处理）
         
@@ -67,6 +67,7 @@ class BertEncoder(nn.Module):
         if isinstance(text_descriptions, str):
             text_descriptions = [text_descriptions]
 
+        max_length = TEXT_MAX_LENGTH if max_length is None else max_length
         all_embeddings = []
         num_total = len(text_descriptions)
 
@@ -77,7 +78,7 @@ class BertEncoder(nn.Module):
                 batch_texts,
                 padding=True,
                 truncation=True,
-                max_length=TEXT_MAX_LENGTH,
+                max_length=max_length,
                 return_tensors="pt"
             ).to(self.device)
 

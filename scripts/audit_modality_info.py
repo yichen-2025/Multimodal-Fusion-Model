@@ -26,6 +26,7 @@ import sys
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import StandardScaler
 
@@ -98,6 +99,11 @@ def make_clf(kind, seed):
             max_iter=150, learning_rate=0.1, max_leaf_nodes=31,
             early_stopping=True, validation_fraction=0.1,
             n_iter_no_change=10, random_state=seed,
+        )
+    if kind == "mlp":
+        return MLPClassifier(
+            hidden_layer_sizes=(256,), max_iter=500, early_stopping=True,
+            n_iter_no_change=15, validation_fraction=0.1, random_state=seed,
         )
     raise ValueError(f"未知估计器 {kind}")
 
@@ -275,7 +281,7 @@ def main():
     ap.add_argument("--parts", default="e81,e82")
     ap.add_argument("--boot", type=int, default=500)
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--estimator", default="logreg", choices=["logreg", "hgb"],
+    ap.add_argument("--estimator", default="logreg", choices=["logreg", "hgb", "mlp"],
                     help="E8.2 的条件互信息估计器（两侧同一函数类）")
     args = ap.parse_args()
     rng = np.random.default_rng(args.seed)
