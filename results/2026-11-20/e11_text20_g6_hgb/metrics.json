@@ -1,0 +1,31 @@
+{
+  "experiment": "E8 模态信息审计",
+  "split_dir": "split_data/dataset_200/split_openset_0_text20_g6",
+  "n_train": 6362,
+  "n_val": 910,
+  "n_test": 1655,
+  "dims": {
+    "features": 79,
+    "text": 768
+  },
+  "e82_conditional_mi": {
+    "entropy_y_test_nats": 2.3019221878883322,
+    "ce_features": 0.017961096566024074,
+    "ce_text": 0.19818804847622234,
+    "ce_features_plus_text": 0.03471951580990074,
+    "acc_features": 0.9957703927492447,
+    "acc_text": 0.9450151057401812,
+    "acc_features_plus_text": 0.9885196374622357,
+    "I_text_y_nats": 2.10373413941211,
+    "I_features_y_nats": 2.283961091322308,
+    "I_text_y_given_features_nats": -0.01675841924387667,
+    "I_text_y_given_features_bootstrap_ci95": [
+      -0.033905619993233105,
+      0.0003401081924324295
+    ],
+    "boot": 500,
+    "estimator_kind": "hgb",
+    "estimator": "CE difference of hgb classifier (plug-in), bootstrap resamples test rows only (no refit)",
+    "conclusion_rule": "I(text;y|features) ≈ 0（CI 覆盖 0 且上界很小）→ 文本无独立信息"
+  }
+}

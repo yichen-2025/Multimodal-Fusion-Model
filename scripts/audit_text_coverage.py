@@ -8,6 +8,9 @@
                        → 检验冗余结论对字段覆盖是否鲁棒（上界是否被人为压低）。
 - `--fields nontext59`：文本只覆盖 20 个 `TEXT_FEATURES` 之外的 59 个字段，
                        `scaled_features` 切到 20 维 → 人为正例，给 C2 判据装刻度。
+- `--fields text20`   ：文本只覆盖 20 个 `TEXT_FEATURES`，`scaled_features` 保持 79 维，
+                       且精度用 `.6g`（E8 原模板为 `.4g`，有损碰撞 8.24%）
+                       → 与 full79 同模板同精度，隔离「字段覆盖」；与 E8 对照隔离「编码精度」。
 
 编码口径与 `text_embeddings` 缓存一致：`BertEncoder`（`[CLS]`、无池化、无归一化）。
 原目录只读，脚本启动即断言 `out_dir != split_dir`。
@@ -68,6 +71,8 @@ def resolve_fields(df, mode):
     if missing:
         raise ValueError(f"TEXT_FEATURES 不在数值列中: {missing}")
     keep_idx = [numeric.index(c) for c in TEXT_FEATURES]
+    if mode == "text20":
+        return [c for c in numeric if c in set(TEXT_FEATURES)], None
     text_fields = [c for c in numeric if c not in set(TEXT_FEATURES)]
     return text_fields, keep_idx
 
@@ -76,7 +81,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--split_dir", required=True)
     ap.add_argument("--out_dir", required=True)
-    ap.add_argument("--fields", required=True, choices=["all79", "nontext59"])
+    ap.add_argument("--fields", required=True, choices=["all79", "nontext59", "text20"])
     ap.add_argument("--model_path", default="models/bert")
     ap.add_argument("--max_length", type=int, default=512)
     ap.add_argument("--batch_size", type=int, default=32)

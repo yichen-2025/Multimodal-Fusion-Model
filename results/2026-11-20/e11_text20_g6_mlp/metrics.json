@@ -1,0 +1,31 @@
+{
+  "experiment": "E8 模态信息审计",
+  "split_dir": "split_data/dataset_200/split_openset_0_text20_g6",
+  "n_train": 6362,
+  "n_val": 910,
+  "n_test": 1655,
+  "dims": {
+    "features": 79,
+    "text": 768
+  },
+  "e82_conditional_mi": {
+    "entropy_y_test_nats": 2.3019221878883322,
+    "ce_features": 0.10069330419032042,
+    "ce_text": 0.08948555874734813,
+    "ce_features_plus_text": 0.07913068955482745,
+    "acc_features": 0.9830815709969789,
+    "acc_text": 0.9740181268882175,
+    "acc_features_plus_text": 0.9824773413897281,
+    "I_text_y_nats": 2.212436629140984,
+    "I_features_y_nats": 2.2012288836980116,
+    "I_text_y_given_features_nats": 0.02156261463549297,
+    "I_text_y_given_features_bootstrap_ci95": [
+      -0.010242722621598867,
+      0.06933226894167548
+    ],
+    "boot": 500,
+    "estimator_kind": "mlp",
+    "estimator": "CE difference of mlp classifier (plug-in), bootstrap resamples test rows only (no refit)",
+    "conclusion_rule": "I(text;y|features) ≈ 0（CI 覆盖 0 且上界很小）→ 文本无独立信息"
+  }
+}
