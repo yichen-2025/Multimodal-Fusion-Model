@@ -94,6 +94,7 @@ def main():
     ap.add_argument("--protos", required=True)
     ap.add_argument("--text_npz", default="",
                     help="可选：Qwen 空间的 ids/emb npz（emb/qwen_texts.npz）；缺省用 split 的 BERT text_embeddings")
+    ap.add_argument("--tag", default="", help="实验标签，写入 metrics.json 的 experiment 字段")
     ap.add_argument("--out", required=True)
     ap.add_argument("--boot", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=42)
@@ -253,8 +254,8 @@ def main():
             r["delta_vs_shot"] >= E4_DELTA_GATE and r["delta_bootstrap_ci95"][0] > 0)
 
     out = {
-        "experiment": "E5 Qwen 空间：零样本 / 少样本语义原型" if args.text_npz
-                      else "E3/E4 BERT 语义原型（零样本 / 少样本）",
+        "experiment": args.tag or ("E5 Qwen 空间：零样本 / 少样本语义原型" if args.text_npz
+                                   else "E3/E4 BERT 语义原型（零样本 / 少样本）"),
         "split_dir": args.split_dir,
         "protos": args.protos,
         "text_source": args.text_npz or "split npz text_embeddings (BERT, 768)",

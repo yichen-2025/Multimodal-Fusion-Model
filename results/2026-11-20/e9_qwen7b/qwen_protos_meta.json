@@ -1,0 +1,21 @@
+{
+  "experiment": "G2 Qwen 类描述编码",
+  "model_path": "models/qwen2.5-7b-ms",
+  "encoder": "Qwen2.5-1.5B AutoModel, last non-pad token, fp16, max_length=256",
+  "n_classes": 10,
+  "n_desc_per_class": 3,
+  "class_names": [
+    "BENIGN",
+    "DoS Hulk",
+    "DoS GoldenEye",
+    "DoS slowloris",
+    "DoS Slowhttptest",
+    "DDoS",
+    "PortScan",
+    "FTP-Patator",
+    "SSH-Patator",
+    "Bot"
+  ],
+  "pairwise_cosine_mean": 0.8852689862251282,
+  "artifact": "emb/qwen7b_protos.npy"
+}

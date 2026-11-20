@@ -105,7 +105,7 @@ def cmd_encode(args):
     ids = [r["sample_id"] for r in recs]
     texts = [r["text"] for r in recs]
 
-    done_ids, done_emb = np.array([], dtype="<U32"), np.zeros((0, 1536), np.float32)
+    done_ids, done_emb = np.array([], dtype="<U32"), np.zeros((0, 0), np.float32)
     if args.resume and os.path.exists(args.out):
         z = np.load(args.out, allow_pickle=False)
         done_ids, done_emb = z["ids"], z["emb"]
@@ -127,13 +127,12 @@ def cmd_encode(args):
         buf_emb.append(emb)
         # 增量落盘
         all_ids = np.r_[done_ids, np.array(buf_ids, dtype="<U32")]
-        all_emb = np.vstack([done_emb] + buf_emb)
+        all_emb = np.vstack(buf_emb) if len(done_ids) == 0 else np.vstack([done_emb] + buf_emb)
         np.savez(args.out, ids=all_ids, emb=all_emb.astype(np.float32))
         print(f"[save] {len(all_ids)}/{len(ids)} -> {args.out}", flush=True)
 
     z = np.load(args.out, allow_pickle=False)
     assert len(z["ids"]) == len(ids), (len(z["ids"]), len(ids))
-    assert z["emb"].shape[1] == 1536, z["emb"].shape
     assert not np.isnan(z["emb"]).any(), "存在 NaN"
     print(f"[OK] {z['emb'].shape} -> {args.out}")
 
@@ -149,7 +148,7 @@ def cmd_protos(args):
     tok, model = load_model(args.model_path)
     E = encode_texts(texts, tok, model, args.batch_size, args.max_length)
     E = E.reshape(NUM_KNOWN, 3, -1).mean(axis=1).astype(np.float32)
-    assert E.shape == (NUM_KNOWN, 1536), E.shape
+    assert E.shape[0] == NUM_KNOWN, E.shape
     assert not np.isnan(E).any()
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     np.save(args.out, E)
