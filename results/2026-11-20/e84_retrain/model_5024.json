@@ -1,0 +1,6 @@
+{
+  "model_dir": "saved_models/model_5024",
+  "n": 1655,
+  "accuracy": 0.9806646525679759,
+  "macro_f1": 0.9809589025229531
+}
