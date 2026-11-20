@@ -140,6 +140,20 @@
 **边界**：只覆盖 BERT-base → Qwen2.5-7B；不得外推到 API 模型或更大规模。
 **产物**：`results/2026-11-20/e9_qwen7b/metrics.json`、`emb/qwen7b_protos.npy`、`emb/qwen7b_texts.npz`
 
+### 5.4 C-30 预注册：E8.4 去文本消融（重训版，2026-11-20，**跑数前**）
+
+**假设**：H1 预测文本分支可省。
+**设计**：`scripts/train.py --variant "A0*_no_text"`（仅 79 维数值，同 split/预处理/超参），seeds = {42, 43, 44, 45, 46}；指标 = 闭集 test 已知类准确率。
+**基准**：A0*（`saved_models/model_2013`，单 seed），同 split test 已知类 acc = **0.9940**。
+**判据（不得事后修改）**：
+- Δ = mean(acc_no_text) − 0.9940；5 seed bootstrap 95% CI **下界 > −1pp** → 「文本可省」（支持 H1）
+- 下界 ≤ −1pp → 「文本不可省」，须修订 H1 表述
+**已知局限**（预先声明）：
+- 基准为单 seed，Δ 的不确定性被低估；结论仅用于方向判定，不用于精确效应量
+- `A0*_no_text` 关闭 LLM 后参数量与 A0* 差异极大，Δ 含容量因素
+**旧产物处理**：2026-09/10 的 `A0*_no_text` 检查点（闭集 0.54–0.71）为旧批次，**不作证据**；本轮全部重训。
+**产物**：`saved_models/model_*`（A0*_no_text 变体）、`results/2026-11-20/e84_retrain/metrics.json`
+
 ## 6. 产物索引
 
 | 用途 | 路径 | 台账状态 |
@@ -177,6 +191,7 @@
 | 2026-11-20 | v1.8 | E8.3 阳性对照（跨类 donor）回填：文本侧 66.2% CI[63.9,68.3] vs 特征侧 10.1%；修正 E8.3 判读为「门槛通过但解读需修正」——不支持「模型不读文本」，文本无额外信息仍由 E8.1/E8.2 承担；`scripts/e83_perturbation.py` 增 `--donor {same,cross}` |
 | 2026-11-20 | v1.9 | E9 容量阶梯完成并回填（§5.3 C-29）：Qwen2.5-7B 零样本闭集 0.1130、开集 AUROC 0.4767 / tpr@fpr=1% 0.0（BERT 0.741 / 1.5B 0.614 / 7B 0.477）→ **容量无效**；`scripts/cache_text_embeddings.py` 支持任意维度编码器（3584 维）；新增 `emb/qwen7b_*`、`results/2026-11-20/e9_qwen7b/` |
 | 2026-11-20 | v2.0 | C4 成本-精度完成（第 7 章）：batch=1 实测延迟 MLP(CPU,1线程) 0.035ms / MLP(GPU) 0.103ms / BERT 编码 7.07ms / A0* 36.36ms（p95 46.71）/ tokenize 0.38ms；前沿在 79 维 MLP（0.9855）饱和，A0* 约 1040 倍成本换 +0.85pp；新增 `scripts/bench_latency.py`、`results/2026-11-20/c4_latency/` |
+| 2026-11-20 | v2.1 | 新增 §5.4 **C-30 预注册**（E8.4 重训版）：5 seeds `A0*_no_text`，判据 Δ ≥ −1pp；总纲升 v1.5 授予唯一重训例外 |
 | 2026-11-20 | v1.9 | §5.2 新增「E8 检查1 确定性复核」行：9362/9362 逐条一致、`:.4g` 有损编码（test 碰撞 8.24%）→ 文本＝f(20 字段)，R≈0 属构造性必然；新增 `scripts/check_text_determinism.py` 与该产物；E8.4 产物加机器可读标记 `trustworthy:false / usable_for_claim:false / verdict:待检验`；`e83_perturbation.py` 的 gate 改为按 donor 角色输出（阳性对照标 `applicable:false`，不再出现误导性 `pass:false`）；两份 e83 产物按新 schema 重跑，数值逐位复现 |
 
 > 新增结论必须先定状态再写数值；状态升级（未支持 → 已证实）需要新的预注册口径与产物，
