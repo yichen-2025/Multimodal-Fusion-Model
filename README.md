@@ -1,12 +1,12 @@
 # 多模态融合网络流量分类模型
 
-基于多模态融合的网络流量恶意检测模型，结合统计特征模态和文本描述模态进行流量分类，并支持消融实验以验证各模态的有效性。项目当前已拓展至**开集未知攻击检测**场景，并以 A3 对照检验「LLM 主干是否更优」这一立项假设（结论见 `docs/stage_conclusion_20261103.md`）。
+基于多模态融合的网络流量恶意检测模型，结合统计特征模态和文本描述模态进行流量分类，并支持消融实验以验证各模态的有效性。项目当前聚焦**开集未知攻击检测**场景，并已完成「LLM 主干能否带来开集增益」的受控检验。四条主结论已冻结为 `docs/claims.md` v2.7（tag `claims-v2.7-frozen`），逐实验证据见 `results/2026-11-20/SUMMARY-2026-11-20.md`，论文初稿见 `docs/第1章-绪论.md` ～ `docs/第9章-结论.md`。
 
 ## 项目简介
 
 本项目实现了一个多模态融合模型，用于网络流量恶意检测。模型将网络流量数据转换为两种模态：
 
-1. **统计特征模态**：9维数值特征（如包长度均值、端口号等），经数值编码器处理。
+1. **统计特征模态**：79 维数值特征（如包长度均值、端口号等），经数值编码器处理。
 2. **文本描述模态**：将流量特征转换为中文自然语言描述。基线变体 **A3** 用 BERT 提取 768 维语义嵌入；含 LLM 的变体（A0/A0\*/A0_frozen/A0\*_no_num）改用 **Qwen2.5-1.5B 作文本编码器**（对真实中文文本做 mean pooling，输出 1536 维文本向量）。
 
 通过多模态融合技术，在 **LLM 外部**完成数值与文本特征的融合后送入分类头。LLM 在此**不再充当分类器**，而是作为「文本语义编码器」；BERT 仅在 A3 基线中充当文本编码器。项目提供闭集消融实验，对比不同模态组合与 LLM 用法的有效性。
@@ -17,6 +17,19 @@
 - **LLM 文本编码器（路线 B）**：Qwen2.5-1.5B 冻结底座 + 可选 LoRA（q/v，r=8）作为文本编码器，A0\* 变体启用
 - **闭集消融**：支持 A3 / A0 / A0\* / A0_frozen / A0\*_no_num / A0\*_no_text 六变体对比
 - **开集检测 (OOD)**：基于类原型距离检测未知攻击（见 Phase 1）
+
+## 研究结论（4 条，已冻结 2026-11-22）
+
+**统一口径**：单数据集 **CSE-CIC-IDS2017**（`dataset_200 / split_openset_0`），10 个已知类 + 留出 `Web Attack` 作为未知；79 维数值特征 + 20 字段中文模板文本；编码器为 BERT-base（A3）与 Qwen2.5-1.5B（A0\*）。
+
+| 贡献 | 结论 | 状态 | 主要产物 |
+|---|---|---|---|
+| **C1** | LLM 作文本编码器，相对 BERT 无可检测的 OOD 增益 | 未支持（+1.87pp，95% CI [−8.85, +12.59] 跨零） | `results/2026-11-03/` |
+| **C2** | 文本是数值特征的模板化重编码，独立增量未检出超过约 **6%** | 部分证实（去文本会掉点：冗余 ≠ 无效） | `results/2026-11-19/e8_audit*`、`results/2026-11-20/{e10_*,e11_*}` |
+| **C3** | LLM 语义原型在零样本 / 少样本 / 开集上均未达预注册门槛 | 未支持（三个编码器空间 × k∈{1,5,10,20} 全负） | `results/2026-11-20/{e3_e4_bert,e5_qwen,e6_*,e9_qwen7b}` |
+| **C4** | 成本-精度前沿在 79 维 MLP 处饱和（约 1040× 延迟换 +0.85pp） | 已证实（描述性） | `results/2026-11-20/c4_latency/` |
+
+口径纪律：AUROC 以未知为正类；α/τ 只在 val 上选；负结论只能写「未支持 / 不可区分」，不得反向断言。逐条编号、边界与状态以 [`docs/claims.md`](docs/claims.md) 为唯一登记处。
 
 ## 闭集消融变体（6 变体故事线）
 
@@ -194,16 +207,25 @@ set HF_ENDPOINT=https://hf-mirror.com
 
 ### 3. 准备数据集
 
-> **数据集下载说明**：本项目实际使用的是 **CSE-CIC-IDS2017** 与 **UNSW-NB15** 两个数据集，评估多分类（12 类）的开集多模态融合。数据集体积较大，请自行下载后放入 `data_processing/`：
+> **口径（2026-11-24）**：本仓库当前只使用 **CSE-CIC-IDS2017**（`dataset_200`），10 个已知类 + 留出 `Web Attack` 作为未知类，79 维数值特征 + 20 字段中文模板文本。此前文档中的「CSE-CIC-IDS2017 + UNSW-NB15、12 类」属 2026-08 旧口径，已废弃。
 >
-> - CSE-CIC-IDS2017：https://www.unb.ca/cic/datasets/ids-2017.html
-> - UNSW-NB15：https://research.unsw.edu.au/projects/unsw-nb15-dataset
->
-> 数据预处理（清洗 / 子集 / 模态分离）会自动完成格式统一，详见下方「运行项目」。
+> 原始 CSV（约 1.1 GB）、处理后的 `split_data/`（约 350 MB）与预训练权重（BERT / Qwen2.5-1.5B）均**不入库**。最小复现数据包（`split_openset_0/{train,val,test}.npz`）与权重获取方式将随 GitHub Release + `REPRODUCE.md` 提供（整理中）。
 
-将原始数据集（CSV格式）放入 `data_processing/` 目录，数据集需包含：
-- `Label` 列：取值见 `processed_dataset/label_mapping.json`，为 **12 类**（BENIGN + 11 种攻击，如 DoS Hulk / DDoS / PortScan / Bot / Web Attack 等）
-- 特征列：`Destination Port`, `Bwd Packet Length Mean`, `Avg Bwd Segment Size`, `Bwd Packet Length Max`, `Bwd Packet Length Std`, `URG Flag Count`, `Packet Length Mean`, `Average Packet Size`, `Packet Length Std`
+将 CSE-CIC-IDS2017 原始 CSV 放入 `data_processing/`（官方下载：https://www.unb.ca/cic/datasets/ids-2017.html），然后依次运行：
+
+```bash
+python scripts/data_cleaning.py
+python scripts/extract_subset.py        # 子集（目标 dataset_200；参数见 --help）
+python scripts/split_modality.py        # 生成 split_data/dataset_200/
+python scripts/make_openset_split.py    # 生成 split_openset_0（留出 Web Attack）
+```
+
+具体参数以各脚本 `--help` 为准（`docs/commands.md` 为 2026-08 快照，随复现整理一并更新）。
+
+数据约定：
+- `Label` 列：10 个已知类（BENIGN、DoS Hulk、DoS GoldenEye、DoS slowloris、DoS Slowhttptest、DDoS、PortScan、FTP-Patator、SSH-Patator、Bot），`Web Attack` 留出为未知；类名映射见 `saved_ood_heads/ood_head_39/config.json` 的 `label_mapping`
+- 数值特征：**79 维**（`split_*` 中的 `scaled_features`）
+- 文本：由 20 个字段生成中文模板（`utils/flow_features.py::generate_text_description`），**不是**手工挑选的 9 列
 
 ### 4. 运行项目
 
@@ -258,7 +280,7 @@ OOD 检测头基于**类原型距离**检测未知样本；同一套头分别接
 - **Center-Loss**：训练时拉近同类特征与原型的距离
 - **OOD 来源**：用 `make_openset_split.py` 的**留出类别**策略（真实分布偏移），而非随机打标
 
-### ⚠️ 当前执行阻塞（OOD 流水线脚本待修，来自阶段规划）
+### 历史记录：OOD 流水线集成缺陷（2026-09 已修复，仅留档）
 
 | BUG | 位置 | 问题 | 后果 |
 |-----|------|------|------|
@@ -267,11 +289,11 @@ OOD 检测头基于**类原型距离**检测未知样本；同一套头分别接
 | C | 两脚本 DataLoader 全 `use_llm=False` | 无 input_ids 产出 | 与 BUG A 同源 |
 | D | `run_ood_routing.py` 把 unknown 交给 `llm_model.predict()`（闭集 argmax） | 只能输出 0..K-1 已知类，**永不输出 unknown** | 生成式路由结构不可行 → 已决定放弃，改 OOD 头特征质量对比 |
 
-> 上述脚本修复（P0 修集成，约 0.5–1 天）完成后，方可按下方步骤执行；08-28 的 `openworld_*` 旧结果不可引用。
+> 上述缺陷已于 2026-09 修复。截至 2026-11 已产出 43 个 backbone、86 个 OOD 头与 237 份路由报告，C1（C-25）的 A3 对照即在此基础之上完成。下方「执行步骤」为历史命令；现行命令见 `docs/commands.md` 与 `how_to_run.md`。
 
-### 执行步骤（待脚本修复后）
+### 执行步骤（历史命令，保留用于追溯）
 
-> 通过直接脚本 CLI 调用。`<A3_id>`、`<A0*_id>`、`<ood_id>` 为前序步骤真实目录名。主战场用 **dataset_3（15 类，最难）**，复现用 dataset_0（12 类）。
+> 通过直接脚本 CLI 调用。`<A3_id>`、`<A0*_id>`、`<ood_id>` 为前序步骤真实目录名。**注意：本节命令对应 2026-09 的 dataset_3（15 类）/ dataset_0（12 类）旧口径，现行主口径为 `dataset_200` / `split_openset_0`（10 类 + Web Attack 未知），开集流程见 `docs/commands.md`。**
 
 #### Step 1 — 构造开集数据（留出类别→unknown）
 
@@ -344,8 +366,8 @@ python scripts/report_generator.py
 
 ### 数据格式
 
-- 原始数据集：CSV格式，包含`Label`列（取值为 12 类，详见 `processed_dataset/label_mapping.json`）
-- 支持的特征列：`Destination Port`, `Bwd Packet Length Mean`, `Avg Bwd Segment Size`, `Bwd Packet Length Max`, `Bwd Packet Length Std`, `URG Flag Count`, `Packet Length Mean`, `Average Packet Size`, `Packet Length Std`
+- 原始数据集：CSV 格式，包含 `Label` 列；当前口径为 **10 个已知类 + 1 个留出未知类**（Web Attack），映射见 `saved_ood_heads/ood_head_39/config.json`
+- 数值特征：**79 维**；文本由 20 个字段生成（`utils/flow_features.py::TEXT_FEATURES` / `generate_text_description`），长度上限 256
 
 ### 日志系统
 
@@ -384,8 +406,10 @@ python -m pytest tests/test_project.py -v
 模型架构参考 `原理图.png`，数据处理流程参考 `数据集处理流程图.png`。
 ## 适用边界
 
-- **少样本线（Phase 1.4）未在当前数据集上验证**：`split_data/dataset_200/` 下不存在 `split_fewshot_*` 划分；`split_data/dataset_0/` 的旧划分（测试集 8352 条）与当前口径不兼容。因此本仓库不给出少样本结论，仅保留 `scripts/make_fewshot.py` 的构造能力。
-- 所有指标来自同分布随机切分（`dataset_200` / `split_openset_0`），未做分布外推检验；A3 对照结论的置信度受 backbone seed n=3 限制。
+- **少样本线已检验且为负**：2026-11-20 在 BERT / Qwen1.5B / Qwen7B 三个空间做了 k∈{1,5,10,20} × 5 seed，语义原型增益未达 +3pp 预注册门槛（C-20 未支持），见 `results/2026-11-20/`。
+- 主结论来自**单一数据集**（`dataset_200` / `split_openset_0`）、**单一留出家族**（Web Attack）、单模板文本；不得外推为「通用未知检测」或「跨数据集泛化」。A3 对照的置信度受 backbone seed n=5 限制。
+- **未做人类评测**：解释层只报客观指标，不写 `actionability` / `sufficiency` 的正向结论。
+- 扩展项 E12（第二数据集）/ E13（非 Qwen 家族）在 `docs/claims.md` 登记为 `待检验`，不影响上述四条。
 
 ## 生成物台账
 
