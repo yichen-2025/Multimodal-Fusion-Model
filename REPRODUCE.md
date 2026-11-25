@@ -49,20 +49,27 @@ python -c "import torch, sklearn, numpy; print(torch.__version__, sklearn.__vers
 
 | 资产 | 路径 | 大小 | 用于 | 来源 |
 |---|---|---|---|---|
-| 开集划分 | `split_data/dataset_200/split_openset_0/` | ~17.5 MB（npz）+ csv | C1–C3 | Release 附件 `split_openset_0.tar.gz` |
+| 开集划分 | `split_data/dataset_200/split_openset_0/` | 19 MB（tar.gz；解压 40 MB） | C1–C3 | Release 附件 `split_openset_0.tar.gz` |
 | BERT 文本嵌入/原型 | `emb/bert_protos.npz` | 已入库 | C3 | git |
 | Qwen 文本嵌入/原型 | `emb/qwen_texts.npz`、`emb/qwen_protos.npy` | 已入库 | C3 | git |
 | Qwen7B | `emb/qwen7b_texts.npz`、`emb/qwen7b_protos.npy` | 已入库（56 MB） | C3 | git |
-| 路由报告 | `ood_reports/` | 231 个 JSON | C1 分数级重算 | Release 附件 `ood_reports.tar.gz` |
-| OOD 头 | `saved_ood_heads/` | 12 MB | C1 重训/重评 | Release 附件 |
+| 路由报告 | `ood_reports/` | 6.8 MB（231 个 JSON） | C1 分数级重算 | Release 附件 `ood_reports.tar.gz` |
+| OOD 头 | `saved_ood_heads/` | 9.6 MB（86 个） | C1 重训/重评 | Release 附件 `saved_ood_heads.tar.gz` |
 | 预训练权重 | `models/bert`、`models/qwen2.5-1.5b` | — | 仅重算文本嵌入/延迟时需要 | `tools/download_*.py` |
 
-> **注意**：Release 附件（`split_openset_0.tar.gz`、`ood_reports.tar.gz`、`saved_ood_heads.tar.gz`）是待发布项。在附件上传前，请使用本机已有副本，并自行记录 sha256。
+> **注意**：三个附件已打包在实例 `/root/autodl-tmp/release_assets/`（含 `SHA256SUMS`），**尚未上传 GitHub Release**。上传前请从该目录取用；上传后以 Release 页的校验和为准。
 
-校验（Release 页面附 sha256）：
+校验（Release 页面的 `SHA256SUMS` 与本表一致）：
+
+```
+7a8b2e86fb1fada3b942f8fd65336133bf36f450402b2bfd093b5f9aff92eaa0  split_openset_0.tar.gz
+ef522fd2dafc8170432adde2be3f67e9424088859c3a8b29c866b48e8934fb66  ood_reports.tar.gz
+23c838e8439b266726f438fc34bfc023d2db6a6c36ba0902bf54bcc6e2bb7708  saved_ood_heads.tar.gz
+```
 
 ```bash
-sha256sum split_data/dataset_200/split_openset_0/*.npz
+sha256sum -c SHA256SUMS
+tar -xzf split_openset_0.tar.gz -C split_data/dataset_200/
 python -c "import numpy as np; z=np.load('split_data/dataset_200/split_openset_0/train.npz'); print(len(z['labels']))"
 # 期望：train 6362 / val 960 / test 2040；已知类 10 + 未知类 Web Attack
 ```
@@ -174,6 +181,8 @@ python scripts/bench_latency.py \
 
 C2/C3 的复现产物位于 `results/2026-11-25/repro_e8_audit/`、`repro_e3_e4_bert/`（本机实测，不入库）。
 
+**数据包完整性验收（2026-11-25）**：把 `split_openset_0.tar.gz` 解压到全新目录后重跑 C2/C3，5 个数据文件（`train/val/test.npz`、`label_mapping.json`、`train_scaler.npy`）的 sha256 与仓库内原件**全部一致**，指标 diff 仍为 0.0；`ood_reports.tar.gz` 解出 231 份、`saved_ood_heads.tar.gz` 解出 86 个目录。
+
 ## 4. 判定与容差
 
 1. **A 级**：全部关键字段 `|diff| ≤ 1e-9`。差一点先查数据（npz 行序/类别映射），再查 sklearn 版本。
@@ -214,11 +223,11 @@ print(round(mean, 4), [round(x, 2) for x in ci])   # 1.8701 [-8.85, 12.59]
 
 ## 附录 B — 不入库资产清单（Release 发布项）
 
-| 打包项 | 内容 | 必要性 |
-|---|---|---|
-| `split_openset_0.tar.gz` | `train/val/test.npz` + `label_mapping.json` + `train_scaler.npy` | C1–C3 必需 |
-| `ood_reports.tar.gz` | 231 份 `ood_routing_*.json` | C1 分数级重算必需 |
-| `saved_ood_heads.tar.gz` | 86 个 OOD 头 | C1 重评/重训 |
-| `SHA256SUMS` | 上列所有文件的校验和 | 全部 |
+| 打包项 | 内容 | 必要性 | 状态 |
+|---|---|---|---|
+| `split_openset_0.tar.gz` | `train/val/test.npz` + `label_mapping.json` + `train_scaler.npy` + 原始 csv | C1–C3 必需 | ✅ 已打包 |
+| `ood_reports.tar.gz` | 231 份 `ood_routing_*.json` | C1 分数级重算必需 | ✅ 已打包 |
+| `saved_ood_heads.tar.gz` | 86 个 OOD 头 | C1 重评/重训 | ✅ 已打包 |
+| `SHA256SUMS` | 上列所有文件的校验和 | 全部 | ✅ 已生成 |
 
 权重（BERT / Qwen2.5-1.5B / Qwen7B）不打包，用 `tools/download_*.py` 从 HF 拉取。
