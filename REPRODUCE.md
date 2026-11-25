@@ -26,9 +26,10 @@
 ```bash
 git clone https://github.com/yichen-2025/Multimodal-Fusion-Model.git
 cd Multimodal-Fusion-Model
-git checkout stage-1-frozen   # 可选：精确回到冻结基线 4241d96
 git log -1 --oneline
 ```
+
+> 冻结基线为 tag `stage-1-frozen`（`4241d96`）；该 tag 之后的提交只改文档，不影响复现结果。
 
 ### 1.2 环境（锁定的实测版本）
 
