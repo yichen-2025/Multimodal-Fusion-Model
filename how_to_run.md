@@ -2,12 +2,16 @@
 
 本项目所有步骤均通过**直接脚本 CLI** 运行，不再使用 `main.py --run` 统一入口。
 
+> **解释器路径**：连云端实例时通常是非交互 SSH，`python` 不在 PATH。先 `export PY=/root/miniconda3/bin/python`，下文示例中的 `python` 一律替换成 `$PY`。
+> **与复现文档的关系**：本文只讲"怎么运行"；论文四条主结论的数值复现见 [`REPRODUCE.md`](REPRODUCE.md)，全部 35 条结论的逐条验证见 [`docs/复现-全结论验证指南-20261125.md`](docs/复现-全结论验证指南-20261125.md)。
+> **GPU 前置**：`$PY -c "import torch;print(torch.cuda.is_available())"` 为 `False` 时（无卡模式），只能跑数据预处理、A3 与 CPU 重算；含 LLM 的变体与延迟测量必须先切 GPU 模式。
+
 ## 重要：所有实验命令须经 `run.py` 执行
 
-为了记录每次实验运行的元信息（命令、耗时、状态、产物说明等），**所有实验命令必须加 `python run.py` 前缀**：
+为了记录每次实验运行的元信息（命令、耗时、状态、产物说明等），**所有实验命令必须套一层 `$PY run.py` 前缀**（`$PY=/root/miniconda3/bin/python`）：
 
 ```bash
-python run.py <真实命令>
+$PY run.py $PY <真实命令>
 ```
 
 `run.py` 会：
@@ -22,37 +26,40 @@ python run.py <真实命令>
 在项目根目录下通过 `run.py` 执行脚本：
 
 ```bash
-python run.py python scripts/<脚本名>.py --参数
+export PY=/root/miniconda3/bin/python
+$PY run.py $PY scripts/<脚本名>.py --参数
 ```
 
 例如：
 
 ```bash
 # 数据清洗
-python run.py python scripts/data_cleaning.py
+$PY run.py $PY scripts/data_cleaning.py
 
-# 提取子集
-python run.py python scripts/extract_subset.py --total_samples 5000 --dataset_id 0
+# 提取子集（主口径见 REPRODUCE.md §1.3：--mode balanced --total_samples 9999 --dataset_id 200）
+$PY run.py $PY scripts/extract_subset.py --total_samples 5000 --dataset_id 0
 
 # 模态分离
-python run.py python scripts/split_modality.py --dataset_id 0
+$PY run.py $PY scripts/split_modality.py --dataset_id 0
 
 # 训练 A3
-python run.py python scripts/train.py --variant A3 --dataset_id 0 --split_id 0
+$PY run.py $PY scripts/train.py --variant A3 --dataset_id 0 --split_id 0
 
 # 测试
-python run.py python scripts/test_model.py --model_id <id> --dataset_id 0 --split_id 0
+$PY run.py $PY scripts/test_model.py --model_id <id> --dataset_id 0 --split_id 0
 ```
 
 查看某个脚本支持的所有参数：
 
 ```bash
-python run.py python scripts/<脚本名>.py --help
+$PY run.py $PY scripts/<脚本名>.py --help
 ```
+
+> 说明：`run.py` 只是日志包装器，不影响数值。`REPRODUCE.md` 中的命令为了可直接粘贴而没有套 `run.py`；若希望每次运行都落 `run_history/`，按本节加外层即可。两处的脚本参数必须一致，不要把 `dataset_0/3`（旧口径）与 `dataset_200`（主口径）混用。
 
 ## 完整命令模板
 
-常用命令模板（含参数说明与产物）见 **[`docs/commands.md`](docs/commands.md)**，可直接复制使用。
+常用命令模板（含参数说明与产物）见 **[`docs/commands.md`](docs/commands.md)**，可直接复制使用；但该文件是 2026-08 快照，主口径（`dataset_200 / split_openset_0`）以 `REPRODUCE.md` 为准。
 
 ## 运行方式说明
 
@@ -60,4 +67,4 @@ python run.py python scripts/<脚本名>.py --help
 - 脚本运行时会自动创建所需目录（通过 `utils/dirs.py` 的 `ensure_dirs()`）。
 - `<id>` 表示前序步骤生成的真实数字 ID（如 `saved_models/model_9` 中的 `9`）。
 - 含 LLM 的变体（如 `A0*`）需 GPU；`A3`（无 LLM，纯 MLP）可在 CPU 上快速验证。
-- **所有实验命令必须通过 `python run.py` 前缀执行**，以便自动记录到 `run_history/`。直接执行脚本会绕过记录机制。
+- **所有实验命令必须通过 `$PY run.py $PY scripts/...` 执行**，以便自动记录到 `run_history/`。直接执行脚本会绕过记录机制。

@@ -1,8 +1,36 @@
 # 命令模板
 
+> ⚠️ **时效声明（2026-11-25）**：本文件是 **2026-08 旧口径快照**，示例统一用 `dataset_0`（12 类）/`dataset_3`（15 类）。本仓库所有结论的口径是 **`dataset_200` / `split_openset_0`**（10 个已知类 + 留出 Web Attack），复现请以 [`REPRODUCE.md`](../REPRODUCE.md) 与 [`复现-全结论验证指南-20261125.md`](复现-全结论验证指南-20261125.md) 为准；本文件仅作脚本参数速查。
 > 本项目所有步骤均通过**直接脚本 CLI** 运行，不再使用 `main.py --run` 统一入口。
-> 所有命令均需在项目根目录下执行（`python scripts/xxx.py ...`）。
+> 所有命令均需在项目根目录下执行。非交互 SSH 下 `python` 不在 PATH，先 `export PY=/root/miniconda3/bin/python`，下文命令中的 `python` 均指 `$PY`。
 > 参数名已对照各脚本 `--help` 实测校验，可直接复制使用。
+
+---
+
+## 主口径（dataset_200 / split_openset_0）
+
+```bash
+export PY=/root/miniconda3/bin/python
+
+# 数据链
+$PY scripts/data_cleaning.py
+$PY scripts/extract_subset.py --mode balanced --total_samples 9999 --dataset_id 200 --random_state 42
+$PY scripts/split_modality.py --dataset_id 200 --input_csv processed_dataset/dataset_200.csv \
+    --test_size 0.2 --val_size 0.1 --random_state 42
+$PY scripts/make_openset_split.py --dataset_id 200 --source_split_id 0 --hold_out_classes 10 \
+    --simulated_unknown_ratio 0.1 --val_unknown_count 50 --allow_mixed_calibration
+$PY scripts/validate_inputs.py --dataset_id 200        # 必须全通过
+
+# 主干与 OOD（A3 可 CPU，A0* 需 GPU）
+$PY scripts/train.py --variant A3 --dataset_id 200 --split_id 0 --openset --seed 42 --epochs 10
+$PY scripts/train_ood_head.py --model_id <backbone_id> --ood_id <head_id> --dataset_id 200 \
+    --split_id 0 --variant A3 --distance_type cosine --temperature 0.1 --epochs 10 --seed 42
+$PY scripts/run_ood_routing.py --backbone_model_id <backbone_id> --ood_id <head_id> \
+    --dataset_id 200 --split_id 0
+$PY scripts/test_model.py --model_id <backbone_id> --dataset_id 200 --split_id 0
+```
+
+验收：test = **2040**（已知 1655 + 未知 385 = 真实 222 + 模拟 163）。自动检查 GPU：`$PY -c "import torch;print(torch.cuda.is_available())"`。
 
 ---
 
@@ -10,7 +38,7 @@
 
 - `<id>` 表示前序步骤生成的真实数字 ID（如 `saved_models/model_9` 中的 `9`）。
 - `--dataset_id` / `--split_id` 建议在同一条实验链路中保持固定。
-- 数据集 ID 以 `split_data/` 下实际存在的目录为准（常见：`dataset_0` 12 类、`dataset_3` 15 类）。
+- 数据集 ID：主口径固定 `200`；以下各节的 `dataset_0`/`dataset_3` 为 2026-08 旧口径示例（12/15 类），仅用于速查参数，**不要**用于复现结论。
 - LLM 模型路径默认 `--model_path /root/autodl-tmp/Multimodal-Fusion-Model/models/qwen2.5-1.5b`（按需替换）。
 
 ---
@@ -20,7 +48,7 @@
 ### 1. 数据清洗
 
 ```bash
-python scripts/data_cleaning.py
+$PY scripts/data_cleaning.py
 ```
 
 - 参数：`--use_merged`（默认开启，合并为 12 类）/ `--no_merged`（使用原始 15 类）。
@@ -29,7 +57,7 @@ python scripts/data_cleaning.py
 ### 2. 提取子集
 
 ```bash
-python scripts/extract_subset.py --total_samples 5000 --dataset_id 0 --random_state 42
+$PY scripts/extract_subset.py --total_samples 5000 --dataset_id 0 --random_state 42
 ```
 
 - 参数：
@@ -43,7 +71,7 @@ python scripts/extract_subset.py --total_samples 5000 --dataset_id 0 --random_st
 ### 3. 模态分离
 
 ```bash
-python scripts/split_modality.py --dataset_id 0 --test_size 0.2 --val_size 0.1
+$PY scripts/split_modality.py --dataset_id 0 --test_size 0.2 --val_size 0.1
 ```
 
 - 参数：`--dataset_id`、`--split_id`（默认自动递增）、`--test_size`、`--val_size`、`--random_state`、`--input_csv`。
@@ -56,7 +84,7 @@ python scripts/split_modality.py --dataset_id 0 --test_size 0.2 --val_size 0.1
 ### 4. 训练融合模型
 
 ```bash
-python scripts/train.py --variant A3 --dataset_id 0 --split_id 0 --epochs 5 --lr 5e-4
+$PY scripts/train.py --variant A3 --dataset_id 0 --split_id 0 --epochs 5 --lr 5e-4
 ```
 
 - 关键参数：
@@ -71,7 +99,7 @@ python scripts/train.py --variant A3 --dataset_id 0 --split_id 0 --epochs 5 --lr
 ### 5. 测试模型
 
 ```bash
-python scripts/test_model.py --model_id <id> --dataset_id 0 --split_id 0
+$PY scripts/test_model.py --model_id <id> --dataset_id 0 --split_id 0
 ```
 
 - 参数：`--model_id`（或 `--saved_model_path`）、`--dataset_id`、`--split_id`、`--variant`（写入报告区分）、`--openset`、`--no_save_report`。
@@ -80,7 +108,7 @@ python scripts/test_model.py --model_id <id> --dataset_id 0 --split_id 0
 ### 6. 消融实验
 
 ```bash
-python scripts/run_ablation.py --variants A3 A0* A0_frozen --dataset_id 0 --split_id 0
+$PY scripts/run_ablation.py --variants A3 A0* A0_frozen --dataset_id 0 --split_id 0
 ```
 
 - 参数：`--variants`（空格分隔多个变体）、`--dataset_id`、`--split_id`、`--repeat`、`--seed`、`--plot`。
@@ -93,7 +121,7 @@ python scripts/run_ablation.py --variants A3 A0* A0_frozen --dataset_id 0 --spli
 ### 7. 构造开集划分
 
 ```bash
-python scripts/make_openset_split.py --dataset_id 0 --source_split_id 0 --simulated_unknown_ratio 0.1 --val_unknown_count 50 --allow_mixed_calibration
+$PY scripts/make_openset_split.py --dataset_id 0 --source_split_id 0 --simulated_unknown_ratio 0.1 --val_unknown_count 50 --allow_mixed_calibration
 ```
 
 - 参数：
@@ -108,7 +136,7 @@ python scripts/make_openset_split.py --dataset_id 0 --source_split_id 0 --simula
 ### 8. 构造少样本划分
 
 ```bash
-python scripts/make_fewshot.py --dataset_id 0 --source_split_id 0 --k_values 5
+$PY scripts/make_fewshot.py --dataset_id 0 --source_split_id 0 --k_values 5
 ```
 
 - 参数：
@@ -120,7 +148,7 @@ python scripts/make_fewshot.py --dataset_id 0 --source_split_id 0 --k_values 5
 ### 9. 训练 OOD 检测头
 
 ```bash
-python scripts/train_ood_head.py --model_id <backbone_id> --dataset_id 0 --split_id 0 --variant A3 --fewshot_k 5
+$PY scripts/train_ood_head.py --model_id <backbone_id> --dataset_id 0 --split_id 0 --variant A3 --fewshot_k 5
 ```
 
 - 参数：`--model_id`（backbone 模型 ID）、`--ood_id`（默认自动递增）、`--dataset_id`、`--split_id`、`--variant`、`--fewshot_k`、`--distance_type`、`--lr`、`--epochs`、`--batch_size`。
@@ -129,7 +157,7 @@ python scripts/train_ood_head.py --model_id <backbone_id> --dataset_id 0 --split
 ### 10. OOD 路由评估
 
 ```bash
-python scripts/run_ood_routing.py --backbone_model_id <id> --ood_id <id> --dataset_id 0 --split_id 0 --fewshot_k 5
+$PY scripts/run_ood_routing.py --backbone_model_id <id> --ood_id <id> --dataset_id 0 --split_id 0 --fewshot_k 5
 ```
 
 - 参数（`--backbone_model_id` 与 `--ood_id` 为必填）：
@@ -141,7 +169,7 @@ python scripts/run_ood_routing.py --backbone_model_id <id> --ood_id <id> --datas
 ### 11. 一键开集实验
 
 ```bash
-python scripts/run_openworld_experiment.py --dataset_id 0 --split_id 0 --k_values 5,10,20,None --backbone_variant A3 --llm_variant A0*
+$PY scripts/run_openworld_experiment.py --dataset_id 0 --split_id 0 --k_values 5,10,20,None --backbone_variant A3 --llm_variant A0*
 ```
 
 - 参数：
@@ -156,7 +184,7 @@ python scripts/run_openworld_experiment.py --dataset_id 0 --split_id 0 --k_value
 ### 12. 生成汇总报告
 
 ```bash
-python scripts/report_generator.py
+$PY scripts/report_generator.py
 ```
 
 - 参数：`--output_dir`（输出目录，默认 `test_reports/`）。

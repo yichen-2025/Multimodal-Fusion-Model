@@ -4,6 +4,10 @@
 
 > 冻结基线：分支 `exp/explain-rag`，claims `v2.7`（tag `claims-v2.7-frozen`）。
 > 复现时**不要覆盖** `results/2026-*` 下的任何文件，一律输出到新目录（如 `results/2026-11-25/<exp>/`）。
+>
+> **适用环境**：AutoDL 云端实例（RTX 4080 SUPER 32G）或任何 Linux + CUDA 机器。§2.1–2.3 纯 CPU 可跑；§2.4 需要 GPU。
+> **解释器**：非交互 SSH 下 `python` 不在 PATH。下文统一 `export PY=/root/miniconda3/bin/python`，若你的环境不同，替换 `PY` 的值即可。
+> **覆盖范围**：本文只覆盖论文四条主结论（C1–C4，对应 `claims.md` 的 C-25/C-33、C-28/C-34、C-20/C-29/C-35、C-21/C-11）。`claims.md` 全部 35 条（C-01–C-35）的逐条验证见 `docs/复现-全结论验证指南-20261125.md`。
 
 ## 0. 复现等级一览
 
@@ -30,6 +34,9 @@ git log -1 --oneline
 ```
 
 > 冻结基线为 tag `stage-1-frozen`（`4241d96`）；该 tag 之后的提交只改文档，不影响复现结果。
+>
+> ⚠️ **不要在已投产的实例工作目录里直接 `git checkout stage-1-frozen`**：该目录通常已有未提交的 `docs/claims.md`（v2.9，含 C-33–C-35），且 HEAD 已前进（2026-11-25 为 `03b37fd`），checkout 会冲突或把代码切回旧提交。要做"干净复现"，请按 §1.4 新建目录 clone。
+> ⚠️ **claims v2.9 尚未提交到 GitHub**：GitHub 上的 `docs/claims.md` 与 tag `claims-v2.7-frozen` 都只到 C-32。验证 C-33–C-35 前，需从实例 `scp` 取回 `docs/claims.md`，或等它被提交。
 
 ### 1.2 环境（锁定的实测版本）
 
@@ -41,9 +48,13 @@ git log -1 --oneline
 | numpy | 2.3.2 |
 
 ```bash
-python -V
-python -c "import torch, sklearn, numpy; print(torch.__version__, sklearn.__version__, numpy.__version__)"
+export PY=/root/miniconda3/bin/python        # 非交互 SSH 下 python 不在 PATH
+$PY -V
+$PY -c "import torch, sklearn, numpy; print(torch.__version__, sklearn.__version__, numpy.__version__)"
+$PY -c "import torch; print('cuda', torch.cuda.is_available(), torch.cuda.device_count())"
 ```
+
+`cuda False` 时只能跑 §2.1–2.3；§2.4 需先到 AutoDL 控制台把实例切到 GPU 模式。
 
 > `requirements.txt` 使用 `>=`，直接安装可能拉到更新版本，导致 C1/C4 漂移。**C2/C3 对版本不敏感**（纯 numpy/sklearn 确定性计算），C1 重训与 C4 必须固定上表版本。
 
@@ -60,6 +71,8 @@ python -c "import torch, sklearn, numpy; print(torch.__version__, sklearn.__vers
 | 预训练权重 | `models/bert`、`models/qwen2.5-1.5b` | — | 仅重算文本嵌入/延迟时需要 | `tools/download_*.py` |
 
 > **发布状态**：三个附件已发布到 Release [`stage-1-frozen`](https://github.com/yichen-2025/Multimodal-Fusion-Model/releases/tag/stage-1-frozen)（2026-11-25），校验和以 Release 页与 `SHA256SUMS` 为准；实例 `/root/autodl-tmp/release_assets/` 保留副本。
+>
+> **已在产出实例上时**（`/root/autodl-tmp/Multimodal-Fusion-Model`）：三个包已在 `/root/autodl-tmp/release_assets/`，且 `split_data/`、`ood_reports/`、`saved_ood_heads/` 均已解压就位。此时**跳过下载与解压**，只在该目录执行 `sha256sum -c SHA256SUMS` 即可。
 
 校验（Release 页面的 `SHA256SUMS` 与本表一致）：
 
@@ -72,16 +85,32 @@ ef522fd2dafc8170432adde2be3f67e9424088859c3a8b29c866b48e8934fb66  ood_reports.ta
 ```bash
 sha256sum -c SHA256SUMS
 tar -xzf split_openset_0.tar.gz -C split_data/dataset_200/
-python -c "import numpy as np; z=np.load('split_data/dataset_200/split_openset_0/train.npz'); print(len(z['labels']))"
+$PY -c "import numpy as np; z=np.load('split_data/dataset_200/split_openset_0/train.npz'); print(len(z['labels']))"
 # 期望：train 6362 / val 960 / test 2040；已知类 10 + 未知类 Web Attack
 ```
+
+### 1.4 干净复现目录（可选，推荐用于"独立可复现"证明）
+
+```bash
+mkdir -p /root/autodl-tmp/repro_check && cd /root/autodl-tmp/repro_check
+git clone -b exp/explain-rag https://github.com/yichen-2025/Multimodal-Fusion-Model.git .
+git log -1 --oneline          # 03b37fd 或其后的纯文档提交
+# 放入 Release 三个包 + SHA256SUMS，校验后解压：
+sha256sum -c SHA256SUMS
+mkdir -p split_data/dataset_200
+tar -xzf split_openset_0.tar.gz -C split_data/dataset_200/
+tar -xzf ood_reports.tar.gz -C .
+tar -xzf saved_ood_heads.tar.gz -C .
+```
+
+这样做的意义：验证"GitHub 代码 + Release 资产"本身能否独立复现，不依赖实例上遗留的 `saved_models/`、`logs/` 等目录。产物一律写到该目录的 `results/2026-11-25/` 下。
 
 ## 2. 逐条复现
 
 ### 2.1 C2 — 模态信息审计（等级 A）
 
 ```bash
-python scripts/audit_modality_info.py \
+$PY scripts/audit_modality_info.py \
   --split_dir split_data/dataset_200/split_openset_0 \
   --out results/2026-11-25/repro_e8_audit \
   --parts e81,e82 --estimator logreg --boot 500 --seed 42
@@ -103,7 +132,7 @@ python scripts/audit_modality_info.py \
 BERT 空间（文本嵌入在 split npz 内）：
 
 ```bash
-python scripts/eval_fewshot_prototypes.py \
+$PY scripts/eval_fewshot_prototypes.py \
   --split_dir split_data/dataset_200/split_openset_0 \
   --protos emb/bert_protos.npz \
   --out results/2026-11-25/repro_e3_e4_bert \
@@ -115,7 +144,7 @@ python scripts/eval_fewshot_prototypes.py \
 Qwen1.5B 空间：
 
 ```bash
-python scripts/eval_fewshot_prototypes.py \
+$PY scripts/eval_fewshot_prototypes.py \
   --split_dir split_data/dataset_200/split_openset_0 \
   --protos emb/qwen_protos.npy \
   --text_npz emb/qwen_texts.npz \
@@ -132,7 +161,7 @@ Qwen7B 空间：把 `--protos` 换成 `emb/qwen7b_protos.npy`、`--text_npz` 换
 **R1（推荐，无需 GPU）**：用已入库的 5-seed 汇总复算配对差。
 
 ```bash
-python scripts/verify_c1_pair.py \
+$PY scripts/verify_c1_pair.py \
   --points results/2026-11-03/ood_multiseed_fair_encoder_n5.json \
   --a "A0*" --b A3 --metric tpr_at_fpr_1
 ```
@@ -149,7 +178,7 @@ diff = +1.8701pp, t-CI95 [-8.85, +12.59], 跨零=True
 **R2（可选，需 GPU）**：分数级重算（231 份路由报告 + OOD 头）。
 
 ```bash
-python scripts/bootstrap_ood_ci.py --n_boot 4000 --seed 20261028 \
+$PY scripts/bootstrap_ood_ci.py --n_boot 4000 --seed 20261028 \
   --out results/2026-11-25/repro_bootstrap_ood_ci.json
 ```
 
@@ -160,7 +189,7 @@ python scripts/bootstrap_ood_ci.py --n_boot 4000 --seed 20261028 \
 需要 GPU + `models/bert`、`models/qwen2.5-1.5b`、`saved_models/model_2013`：
 
 ```bash
-python scripts/bench_latency.py \
+$PY scripts/bench_latency.py \
   --split_dir split_data/dataset_200/split_openset_0 \
   --out results/2026-11-25/repro_c4_latency \
   --n_small 1000 --n_llm 200
@@ -185,6 +214,8 @@ C2/C3 的复现产物位于 `results/2026-11-25/repro_e8_audit/`、`repro_e3_e4_
 
 **数据包完整性验收（2026-11-25）**：把 `split_openset_0.tar.gz` 解压到全新目录后重跑 C2/C3，5 个数据文件（`train/val/test.npz`、`label_mapping.json`、`train_scaler.npy`）的 sha256 与仓库内原件**全部一致**，指标 diff 仍为 0.0；`ood_reports.tar.gz` 解出 231 份、`saved_ood_heads.tar.gz` 解出 86 个目录。
 
+> 2026-11-25 复核：当时实例处于**无卡模式**（`torch.cuda.is_available()=False`），C4 未实测；切到 GPU 模式后按 §2.4 补测。
+
 ## 4. 判定与容差
 
 1. **A 级**：全部关键字段 `|diff| ≤ 1e-9`。差一点先查数据（npz 行序/类别映射），再查 sklearn 版本。
@@ -197,6 +228,7 @@ C2/C3 的复现产物位于 `results/2026-11-25/repro_e8_audit/`、`repro_e3_e4_
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
+| `python: command not found` | 非交互 SSH 未加载 conda，`python` 不在 PATH | 用 `/root/miniconda3/bin/python`（即本文的 `$PY`） |
 | `FileNotFoundError: split_data/...` | 未解压 Release 数据包 | 按 §1.3 放置，比对 sha256 |
 | C2 数值完全不同 | npz 被重新生成（行序变了） | 用 Release 原始 npz，不要跑 `make_openset_split.py` |
 | C3 报缺少 `text_embeddings` | 用了 `--text_npz` 的 Qwen 命令跑 BERT | BERT 不需要 `--text_npz` |

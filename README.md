@@ -162,7 +162,7 @@ pip install torch>=2.0.0 --index-url https://download.pytorch.org/whl/cu121
 验证 GPU 是否可用：
 
 ```bash
-python -c "import torch; print(f'CUDA可用: {torch.cuda.is_available()}')"
+$PY -c "import torch; print(f'CUDA可用: {torch.cuda.is_available()}')"
 ```
 
 #### 1.3 安装其余依赖（使用国内镜像加速）
@@ -196,8 +196,8 @@ index-url = https://pypi.tuna.tsinghua.edu.cn/simple
 项目已内置 HuggingFace 镜像加速（`hf-mirror.com`），无需额外配置。
 
 ```bash
-python tools/download_bert.py    # 下载 BERT 模型（约 400MB）
-python tools/download_qwen.py    # 下载 Qwen2.5-1.5B 模型（约 3GB）
+$PY tools/download_bert.py    # 下载 BERT 模型（约 400MB）
+$PY tools/download_qwen.py    # 下载 Qwen2.5-1.5B 模型（约 3GB）
 ```
 
 如需手动指定镜像源，可通过环境变量设置：
@@ -211,18 +211,24 @@ set HF_ENDPOINT=https://hf-mirror.com
 
 > **口径（2026-11-24）**：本仓库当前只使用 **CSE-CIC-IDS2017**（`dataset_200`），10 个已知类 + 留出 `Web Attack` 作为未知类，79 维数值特征 + 20 字段中文模板文本。此前文档中的「CSE-CIC-IDS2017 + UNSW-NB15、12 类」属 2026-08 旧口径，已废弃。
 >
-> 原始 CSV（约 1.1 GB）、处理后的 `split_data/`（约 350 MB）与预训练权重（BERT / Qwen2.5-1.5B）均**不入库**。最小复现数据包（`split_openset_0/{train,val,test}.npz`）与权重获取方式将随 GitHub Release + `REPRODUCE.md` 提供（整理中）。
+> 原始 CSV（约 1.1 GB）、处理后的 `split_data/`（约 350 MB）与预训练权重（BERT / Qwen2.5-1.5B）均**不入库**。最小复现数据包已随 Release [`stage-1-frozen`](https://github.com/yichen-2025/Multimodal-Fusion-Model/releases/tag/stage-1-frozen) 发布：`split_openset_0.tar.gz`（19 MB）、`ood_reports.tar.gz`（6.8 MB）、`saved_ood_heads.tar.gz`（9.6 MB）与 `SHA256SUMS`；权重用 `tools/download_bert.py`、`tools/download_qwen.py` 拉取。产出实例上 `/root/autodl-tmp/release_assets/` 留有同样三个包的副本。
 
 将 CSE-CIC-IDS2017 原始 CSV 放入 `data_processing/`（官方下载：https://www.unb.ca/cic/datasets/ids-2017.html），然后依次运行：
 
 ```bash
-python scripts/data_cleaning.py
-python scripts/extract_subset.py        # 子集（目标 dataset_200；参数见 --help）
-python scripts/split_modality.py        # 生成 split_data/dataset_200/
-python scripts/make_openset_split.py    # 生成 split_openset_0（留出 Web Attack）
+export PY=/root/miniconda3/bin/python    # 非交互 SSH 下 python 不在 PATH
+$PY scripts/data_cleaning.py
+$PY scripts/extract_subset.py --mode balanced --total_samples 9999 --dataset_id 200 --random_state 42
+$PY scripts/split_modality.py --dataset_id 200 --input_csv processed_dataset/dataset_200.csv \
+    --test_size 0.2 --val_size 0.1 --random_state 42
+$PY scripts/make_openset_split.py --dataset_id 200 --source_split_id 0 --hold_out_classes 10 \
+    --simulated_unknown_ratio 0.1 --val_unknown_count 50 --allow_mixed_calibration
+$PY scripts/validate_inputs.py --dataset_id 200
 ```
 
-具体参数以各脚本 `--help` 为准（`docs/commands.md` 为 2026-08 快照，随复现整理一并更新）。
+验收：`split_data/dataset_200/split_openset_0/` 下 train/val/test = **6362 / 960 / 2040**（test 含 163 条模拟未知 + 222 条真实未知）；`validate_inputs.py` 必须全通过，否则不要往下训。
+
+具体参数以各脚本 `--help` 为准。`docs/commands.md` 是 2026-08 旧口径快照（`dataset_0/3`），**不要**按它生成主数据集；主口径命令以 `REPRODUCE.md` §1.3 为准。
 
 数据约定：
 - `Label` 列：10 个已知类（BENIGN、DoS Hulk、DoS GoldenEye、DoS slowloris、DoS Slowhttptest、DDoS、PortScan、FTP-Patator、SSH-Patator、Bot），`Web Attack` 留出为未知；类名映射见 `saved_ood_heads/ood_head_39/config.json` 的 `label_mapping`
@@ -231,29 +237,31 @@ python scripts/make_openset_split.py    # 生成 split_openset_0（留出 Web At
 
 ### 4. 运行项目
 
-所有步骤通过**直接脚本 CLI** 运行（`python scripts/xxx.py --参数`），不再使用统一入口。完整命令模板见 [`docs/commands.md`](docs/commands.md)。
+所有步骤通过**直接脚本 CLI** 运行（`$PY scripts/xxx.py --参数`，`PY=/root/miniconda3/bin/python`），不再使用统一入口。主口径闭集命令如下；四条主结论的数值复现见 [`REPRODUCE.md`](REPRODUCE.md)，全部 35 条见 [`docs/复现-全结论验证指南-20261125.md`](docs/复现-全结论验证指南-20261125.md)。
 
 从零跑通闭集（P0）流程：
 
 ```bash
-python scripts/data_cleaning.py
-python scripts/extract_subset.py --dataset_id 3
-python scripts/split_modality.py --dataset_id 3
+$PY scripts/data_cleaning.py
+$PY scripts/extract_subset.py --mode balanced --total_samples 9999 --dataset_id 200 --random_state 42
+$PY scripts/split_modality.py --dataset_id 200 --input_csv processed_dataset/dataset_200.csv
 # 训练 A3（无 LLM，纯 MLP，最快）→ 记录终端打印的 model_id
-python scripts/train.py --dataset_id 3 --split_id 0 --variant A3
+$PY scripts/train.py --dataset_id 200 --split_id 0 --variant A3
 # 训练 A0*（含冻结 Qwen + LoRA，需 GPU）→ 记录 model_id
-python scripts/train.py --dataset_id 3 --split_id 0 --variant A0*
+$PY scripts/train.py --dataset_id 200 --split_id 0 --variant A0*
 # 测试 A3
-python scripts/test_model.py --dataset_id 3 --split_id 0 --model_id <A3_model_id>
+$PY scripts/test_model.py --dataset_id 200 --split_id 0 --model_id <A3_model_id>
 # 一次性跑闭集消融（默认覆盖 A3 / A0* / A0_frozen；全六变体加 --variants）
-python scripts/run_ablation.py --dataset_id 3 --split_id 0
+$PY scripts/run_ablation.py --dataset_id 200 --split_id 0
 ```
 
 > 提示：`model_id` 为训练后 `saved_models/` 下的真实目录名（如 `model_9`）。`dataset_id` / `split_id` 建议全程固定。
-> **数据集 ID 说明**：当前分支 `split_data/` 含 `dataset_0/2/3/4/5`（多分类，12/15 类），旧分支的 `dataset_1` 已不存在；请以 `split_data/` 下实际存在的 ID 为准，推荐 **dataset_3（15 类，最难）** 为闭集主基准、**dataset_0（12 类）** 为复现。
-> 完整命令参数与开集（P1）流程见 `implementation_guide.md`。
+> **数据集 ID 说明**：主口径固定为 **`dataset_200` + `split_openset_0`**（10 个已知类 + 留出 Web Attack，79 维数值 + 20 字段文本）。`split_data/` 下的 `dataset_0/2/3/4/5`（12/15 类）是 2026-08 旧口径，仅作历史参考，**不得**用于复现本仓库的任何结论。
+> 开集（P1）完整命令见 [`REPRODUCE.md`](REPRODUCE.md)；旧版流程说明见 `implementation_guide.md`。
 
 ## Phase 1: 开集未知攻击检测
+
+> ⚠️ **本节是 2026-09-03 的历史记录，命令用 `dataset_3`，与当前主口径不一致，仅存档**。主口径（`dataset_200 / split_openset_0`）的开集命令见 [`REPRODUCE.md`](REPRODUCE.md) §1–2。
 
 > **更新（2026-11-03）**：A3 对照实验已在 `dataset_200` / `split_openset_0` 上完成（3 主干 × 3 头），结论为「A3 与 A0\*_no_num 统计上不可区分；与 A0\* 呈 AUROC 更高 / 低误报召回更低的 trade-off」，详见 `docs/stage_conclusion_20261103.md`。本节其余内容（dataset_3 命令、08-28 失效运行、脚本 BUG 清单）是 2026-09-03 的历史记录，与当前口径不一致，待重写。
 
@@ -300,7 +308,7 @@ OOD 检测头基于**类原型距离**检测未知样本；同一套头分别接
 #### Step 1 — 构造开集数据（留出类别→unknown）
 
 ```bash
-python scripts/make_openset_split.py --dataset_id 3 --source_split_id 0 --simulated_unknown_ratio 0.3
+$PY scripts/make_openset_split.py --dataset_id 3 --source_split_id 0 --simulated_unknown_ratio 0.3
 ```
 
 产物：`split_data/dataset_3/split_openset_0/`（train/val 不含未知，test 含 `unknown`）
@@ -309,9 +317,9 @@ python scripts/make_openset_split.py --dataset_id 3 --source_split_id 0 --simula
 
 ```bash
 # 先确保对应闭集主干已训好存档
-python scripts/train_ood_head.py --model_id <A3_id>       --dataset_id 3 --split_id 0 --variant A3
-python scripts/train_ood_head.py --model_id <A0*_id>      --dataset_id 3 --split_id 0 --variant A0*
-python scripts/train_ood_head.py --model_id <A0_frozen_id> --dataset_id 3 --split_id 0 --variant A0_frozen
+$PY scripts/train_ood_head.py --model_id <A3_id>       --dataset_id 3 --split_id 0 --variant A3
+$PY scripts/train_ood_head.py --model_id <A0*_id>      --dataset_id 3 --split_id 0 --variant A0*
+$PY scripts/train_ood_head.py --model_id <A0_frozen_id> --dataset_id 3 --split_id 0 --variant A0_frozen
 ```
 
 产物：`saved_ood_heads/ood_<id>/`（原型向量 + 阈值）
@@ -319,7 +327,7 @@ python scripts/train_ood_head.py --model_id <A0_frozen_id> --dataset_id 3 --spli
 #### Step 3 — 评测（OOD 头特征质量对比）
 
 ```bash
-python scripts/run_ood_routing.py \
+$PY scripts/run_ood_routing.py \
     --backbone_model_id <A0*_id> \
     --ood_id <ood_id> \
     --dataset_id 3 --split_id 0
@@ -330,7 +338,7 @@ python scripts/run_ood_routing.py \
 #### Step 4 — 生成汇总报告
 
 ```bash
-python scripts/report_generator.py
+$PY scripts/report_generator.py
 ```
 
 产物：
@@ -391,7 +399,7 @@ python scripts/report_generator.py
 运行项目测试套件验证所有功能：
 
 ```bash
-python -m pytest tests/test_project.py -v
+$PY -m pytest tests/test_project.py -v
 ```
 
 ## 项目原理
