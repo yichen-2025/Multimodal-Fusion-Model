@@ -24,9 +24,10 @@
 ### 1.1 代码
 
 ```bash
-git clone -b exp/explain-rag https://github.com/yichen-2025/Multimodal-Fusion-Model.git
+git clone https://github.com/yichen-2025/Multimodal-Fusion-Model.git
 cd Multimodal-Fusion-Model
-git log -1 --oneline        # 应包含 claims v2.7 之后的提交
+git checkout stage-1-frozen   # 可选：精确回到冻结基线 4241d96
+git log -1 --oneline
 ```
 
 ### 1.2 环境（锁定的实测版本）
@@ -57,7 +58,7 @@ python -c "import torch, sklearn, numpy; print(torch.__version__, sklearn.__vers
 | OOD 头 | `saved_ood_heads/` | 9.6 MB（86 个） | C1 重训/重评 | Release 附件 `saved_ood_heads.tar.gz` |
 | 预训练权重 | `models/bert`、`models/qwen2.5-1.5b` | — | 仅重算文本嵌入/延迟时需要 | `tools/download_*.py` |
 
-> **注意**：三个附件已打包在实例 `/root/autodl-tmp/release_assets/`（含 `SHA256SUMS`），**尚未上传 GitHub Release**。上传前请从该目录取用；上传后以 Release 页的校验和为准。
+> **发布状态**：三个附件已发布到 Release [`stage-1-frozen`](https://github.com/yichen-2025/Multimodal-Fusion-Model/releases/tag/stage-1-frozen)（2026-11-25），校验和以 Release 页与 `SHA256SUMS` 为准；实例 `/root/autodl-tmp/release_assets/` 保留副本。
 
 校验（Release 页面的 `SHA256SUMS` 与本表一致）：
 
@@ -225,9 +226,9 @@ print(round(mean, 4), [round(x, 2) for x in ci])   # 1.8701 [-8.85, 12.59]
 
 | 打包项 | 内容 | 必要性 | 状态 |
 |---|---|---|---|
-| `split_openset_0.tar.gz` | `train/val/test.npz` + `label_mapping.json` + `train_scaler.npy` + 原始 csv | C1–C3 必需 | ✅ 已打包 |
-| `ood_reports.tar.gz` | 231 份 `ood_routing_*.json` | C1 分数级重算必需 | ✅ 已打包 |
-| `saved_ood_heads.tar.gz` | 86 个 OOD 头 | C1 重评/重训 | ✅ 已打包 |
-| `SHA256SUMS` | 上列所有文件的校验和 | 全部 | ✅ 已生成 |
+| `split_openset_0.tar.gz` | `train/val/test.npz` + `label_mapping.json` + `train_scaler.npy` + 原始 csv | C1–C3 必需 | ✅ 已发布 |
+| `ood_reports.tar.gz` | 231 份 `ood_routing_*.json` | C1 分数级重算必需 | ✅ 已发布 |
+| `saved_ood_heads.tar.gz` | 86 个 OOD 头 | C1 重评/重训 | ✅ 已发布 |
+| `SHA256SUMS` | 上列所有文件的校验和 | 全部 | ✅ 已发布 |
 
 权重（BERT / Qwen2.5-1.5B / Qwen7B）不打包，用 `tools/download_*.py` 从 HF 拉取。
