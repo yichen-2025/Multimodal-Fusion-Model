@@ -3,7 +3,7 @@
 本项目所有步骤均通过**直接脚本 CLI** 运行，不再使用 `main.py --run` 统一入口。
 
 > **解释器路径**：连云端实例时通常是非交互 SSH，`python` 不在 PATH。先 `export PY=/root/miniconda3/bin/python`，下文示例中的 `python` 一律替换成 `$PY`。
-> **与复现文档的关系**：本文只讲"怎么运行"；论文四条主结论的数值复现见 [`REPRODUCE.md`](REPRODUCE.md)，全部 35 条结论的逐条验证见 [`docs/复现-全结论验证指南-20261125.md`](docs/复现-全结论验证指南-20261125.md)。
+> **与复现文档的关系**：本文只讲"怎么运行"；论文四条主结论的数值复现见 [`REPRODUCE.md`](REPRODUCE.md)，全部 35 条结论的逐条验证见 [`docs/复现-全结论验证指南-20261125.md`](docs/复现-全结论验证指南-20261125.md)。符号（`A0*`、`A3`、`E3`、`recsim`）的统一定义见 `REPRODUCE.md` §0.1；`A0*` 在命令行必须加引号。
 > **GPU 前置**：`$PY -c "import torch;print(torch.cuda.is_available())"` 为 `False` 时（无卡模式），只能跑数据预处理、A3 与 CPU 重算；含 LLM 的变体与延迟测量必须先切 GPU 模式。
 
 ## 重要：所有实验命令须经 `run.py` 执行

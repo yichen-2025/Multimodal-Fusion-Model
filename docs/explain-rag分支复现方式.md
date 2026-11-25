@@ -136,7 +136,7 @@ huggingface-cli download google-bert/bert-base-uncased --local-dir models/bert
 
 ```bash
 /root/miniconda3/bin/$PY scripts/train.py \
-  --variant A0* --dataset_id 200 --split_id 0 --openset \
+  --variant "A0*" --dataset_id 200 --split_id 0 --openset \
   --model_id 2004 --seed 123 --epochs 10 --lr 5e-4
 ```
 
@@ -172,7 +172,7 @@ done
 ```bash
 /root/miniconda3/bin/$PY scripts/train_ood_head.py \
   --model_id 2010 --ood_id 36 --dataset_id 200 --split_id 0 \
-  --variant A0*_attn --distance_type cosine --temperature 0.1 --epochs 10 --seed 44
+  --variant "A0*_attn" --distance_type cosine --temperature 0.1 --epochs 10 --seed 44
 ```
 
 - 每个 backbone 训练 3 个 head seed（42/43/44），单次约 120s
@@ -337,8 +337,8 @@ $PY scripts/split_modality.py --dataset_id 200 --input_csv processed_dataset/dat
 $PY scripts/make_openset_split.py --dataset_id 200 --source_split_id 0 --hold_out_classes 10 --simulated_unknown_ratio 0.1 --val_unknown_count 50 --allow_mixed_calibration
 
 # 2. 只训一个 A0*，只训一个 head，跑一次路由
-$PY scripts/train.py --variant A0* --dataset_id 200 --split_id 0 --openset --epochs 2 --lr 5e-4
-$PY scripts/train_ood_head.py --model_id <上一步ID> --dataset_id 200 --split_id 0 --variant A0* --distance_type cosine
+$PY scripts/train.py --variant "A0*" --dataset_id 200 --split_id 0 --openset --epochs 2 --lr 5e-4
+$PY scripts/train_ood_head.py --model_id <上一步ID> --dataset_id 200 --split_id 0 --variant "A0*" --distance_type cosine
 $PY scripts/run_ood_routing.py --backbone_model_id <上一步ID> --ood_id <head ID> --dataset_id 200 --split_id 0
 
 # 3. 解释 + 检索

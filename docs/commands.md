@@ -108,7 +108,7 @@ $PY scripts/test_model.py --model_id <id> --dataset_id 0 --split_id 0
 ### 6. 消融实验
 
 ```bash
-$PY scripts/run_ablation.py --variants A3 A0* A0_frozen --dataset_id 0 --split_id 0
+$PY scripts/run_ablation.py --variants A3 "A0*" A0_frozen --dataset_id 0 --split_id 0
 ```
 
 - 参数：`--variants`（空格分隔多个变体）、`--dataset_id`、`--split_id`、`--repeat`、`--seed`、`--plot`。

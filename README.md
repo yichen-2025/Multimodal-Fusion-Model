@@ -248,7 +248,7 @@ $PY scripts/split_modality.py --dataset_id 200 --input_csv processed_dataset/dat
 # 训练 A3（无 LLM，纯 MLP，最快）→ 记录终端打印的 model_id
 $PY scripts/train.py --dataset_id 200 --split_id 0 --variant A3
 # 训练 A0*（含冻结 Qwen + LoRA，需 GPU）→ 记录 model_id
-$PY scripts/train.py --dataset_id 200 --split_id 0 --variant A0*
+$PY scripts/train.py --dataset_id 200 --split_id 0 --variant "A0*"
 # 测试 A3
 $PY scripts/test_model.py --dataset_id 200 --split_id 0 --model_id <A3_model_id>
 # 一次性跑闭集消融（默认覆盖 A3 / A0* / A0_frozen；全六变体加 --variants）
@@ -257,6 +257,7 @@ $PY scripts/run_ablation.py --dataset_id 200 --split_id 0
 
 > 提示：`model_id` 为训练后 `saved_models/` 下的真实目录名（如 `model_9`）。`dataset_id` / `split_id` 建议全程固定。
 > **数据集 ID 说明**：主口径固定为 **`dataset_200` + `split_openset_0`**（10 个已知类 + 留出 Web Attack，79 维数值 + 20 字段文本）。`split_data/` 下的 `dataset_0/2/3/4/5`（12/15 类）是 2026-08 旧口径，仅作历史参考，**不得**用于复现本仓库的任何结论。
+> 变体名（`A0*`、`A3`、`A0_frozen`）、实验编号（`E3`、`E8`）与指标缩写（`recsim`）的统一定义见 [`REPRODUCE.md`](REPRODUCE.md) §0.1；`A0*` 在命令行必须加引号。
 > 开集（P1）完整命令见 [`REPRODUCE.md`](REPRODUCE.md)；旧版流程说明见 `implementation_guide.md`。
 
 ## Phase 1: 开集未知攻击检测
@@ -318,7 +319,7 @@ $PY scripts/make_openset_split.py --dataset_id 3 --source_split_id 0 --simulated
 ```bash
 # 先确保对应闭集主干已训好存档
 $PY scripts/train_ood_head.py --model_id <A3_id>       --dataset_id 3 --split_id 0 --variant A3
-$PY scripts/train_ood_head.py --model_id <A0*_id>      --dataset_id 3 --split_id 0 --variant A0*
+$PY scripts/train_ood_head.py --model_id <MODEL_ID>      --dataset_id 3 --split_id 0 --variant "A0*"
 $PY scripts/train_ood_head.py --model_id <A0_frozen_id> --dataset_id 3 --split_id 0 --variant A0_frozen
 ```
 
