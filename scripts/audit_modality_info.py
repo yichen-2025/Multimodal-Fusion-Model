@@ -365,7 +365,7 @@ def main():
                 "estimator_kind": args.estimator,
                 "estimator": f"CE difference of {args.estimator} classifier (plug-in), "
                              "bootstrap resamples test rows only (no refit)",
-                "conclusion_rule": "I(text;y|features) ≈ 0（CI 覆盖 0 且上界很小）→ 文本无独立信息",
+                "conclusion_rule": "I(text;y|features) 未检出 > 约 6% 的增量 → 文本高度冗余（不得写「≈0 / 无独立信息」，判读见 claims C-28）",
             }
             print(f"[E8.2] I(text;y|features) = {i_cond:.4f} nats, CI95 {ci}", flush=True)
 
