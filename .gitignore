@@ -72,3 +72,10 @@ GOAL.md
 
 # 台账备份（本地留档，不入库）
 artifacts/*.bak.*
+
+# 复现临时产物（统一写 results/repro_*）
+# 例外：data_processing/Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv 已入库，历史原因暂保留
+results/repro_*/
+release_assets/
+*.tar.gz
+.tmp/

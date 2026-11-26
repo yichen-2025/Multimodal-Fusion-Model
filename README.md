@@ -31,7 +31,7 @@
 
 口径纪律：AUROC 以未知为正类；α/τ 只在 val 上选；负结论只能写「未支持 / 不可区分」，不得反向断言。逐条编号、边界与状态以 [`docs/claims.md`](docs/claims.md) 为唯一登记处。
 
-复现步骤（含容差、实测对照与失败排查）见 [`REPRODUCE.md`](REPRODUCE.md)。
+复现步骤（含组件来源、逐条命令、容差与失败排查）见 [`REPRODUCE.md`](REPRODUCE.md)。
 
 ## 闭集消融变体（6 变体故事线）
 
@@ -237,7 +237,7 @@ $PY scripts/validate_inputs.py --dataset_id 200
 
 ### 4. 运行项目
 
-所有步骤通过**直接脚本 CLI** 运行（`$PY scripts/xxx.py --参数`，`PY=/root/miniconda3/bin/python`），不再使用统一入口。主口径闭集命令如下；四条主结论的数值复现见 [`REPRODUCE.md`](REPRODUCE.md)，全部 35 条见 [`docs/复现-全结论验证指南-20261125.md`](docs/复现-全结论验证指南-20261125.md)。
+所有步骤通过**直接脚本 CLI** 运行（`$PY scripts/xxx.py --参数`，`PY=/root/miniconda3/bin/python`），不再使用统一入口。主口径闭集命令如下；全部 35 条结论的数值复现见 [`REPRODUCE.md`](REPRODUCE.md)。
 
 从零跑通闭集（P0）流程：
 

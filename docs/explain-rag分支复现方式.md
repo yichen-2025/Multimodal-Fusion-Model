@@ -7,7 +7,7 @@
 > 文档编写日期：2026-10-28；最近核对：2026-11-25
 >
 > **与其他复现文档的分工**：本文是"新机器从 0 重建"的完整流程（含数据链、12 个 backbone、OOD 头、解释）。
-> 只验证论文四条主结论看 [`REPRODUCE.md`](REPRODUCE.md)；逐条核对全部 35 条看 [`复现-全结论验证指南-20261125.md`](复现-全结论验证指南-20261125.md)。三者口径必须一致：`dataset_200 / split_openset_0`。
+> 复现入口是 [`REPRODUCE.md`](../REPRODUCE.md)；本文只作设计与背景说明，不提供复现步骤。口径必须一致：`dataset_200 / split_openset_0`。
 > **解释器**：非交互 SSH 下 `python` 不在 PATH，本文命令里的 `python` 请替换为 `/root/miniconda3/bin/python`。
 > **GPU**：当前实例在无卡模式下 `torch.cuda.is_available()` 为 `False`，第 3–6 节需先切 GPU 模式。
 

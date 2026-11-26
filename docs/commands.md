@@ -1,6 +1,6 @@
 # 命令模板
 
-> ⚠️ **时效声明（2026-11-25）**：本文件是 **2026-08 旧口径快照**，示例统一用 `dataset_0`（12 类）/`dataset_3`（15 类）。本仓库所有结论的口径是 **`dataset_200` / `split_openset_0`**（10 个已知类 + 留出 Web Attack），复现请以 [`REPRODUCE.md`](../REPRODUCE.md) 与 [`复现-全结论验证指南-20261125.md`](复现-全结论验证指南-20261125.md) 为准；本文件仅作脚本参数速查。
+> ⚠️ **时效声明（2026-11-25）**：本文件是 **2026-08 旧口径快照**，示例统一用 `dataset_0`（12 类）/`dataset_3`（15 类）。本仓库所有结论的口径是 **`dataset_200` / `split_openset_0`**（10 个已知类 + 留出 Web Attack），复现请以 [`REPRODUCE.md`](../REPRODUCE.md) 为准；本文件仅作脚本参数速查。
 > 本项目所有步骤均通过**直接脚本 CLI** 运行，不再使用 `main.py --run` 统一入口。
 > 所有命令均需在项目根目录下执行。非交互 SSH 下 `python` 不在 PATH，先 `export PY=/root/miniconda3/bin/python`，下文命令中的 `python` 均指 `$PY`。
 > 参数名已对照各脚本 `--help` 实测校验，可直接复制使用。
